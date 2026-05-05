@@ -6,6 +6,7 @@ const state = {
   currentPage: 0,
   totalPages:  0,
   filename:    '',
+  sourceType:  null,
   /** @type {Object.<number, string>} page → markdown */
   ocrResults:  {},
   /** @type {Object.<number, string>} page → 'pending'|'processing'|'done'|'error' */
@@ -20,6 +21,8 @@ const state = {
 
 // Timer che aggiorna il display ogni secondo mentre l'OCR è in corso
 let _displayTimer = null;
+const PDF_EXTENSIONS = ['.pdf'];
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg'];
 
 function startDisplayTimer() {
   if (_displayTimer) return;
@@ -48,7 +51,8 @@ const $ = id => document.getElementById(id);
 
 const els = {
   uploadOverlay:  $('upload-overlay'),
-  uploadArea:     $('upload-area'),
+  pdfUploadArea:  $('pdf-upload-area'),
+  imageUploadArea:$('image-upload-area'),
   mainContainer:  $('main-container'),
   loadingOverlay: $('loading-overlay'),
   loadingText:    $('loading-text'),
@@ -72,31 +76,22 @@ const els = {
   ollamaBadge:    $('ollama-badge'),
   pdfInput:       $('pdf-input'),
   pdfInputOverlay:$('pdf-input-overlay'),
+  imageInput:     $('image-input'),
+  imageInputOverlay:$('image-input-overlay'),
 };
 
 // ── Inizializzazione ──────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  // Input file header e overlay
-  els.pdfInput.addEventListener('change',        e => handleFile(e.target.files[0]));
-  els.pdfInputOverlay.addEventListener('change', e => handleFile(e.target.files[0]));
+  preventBrowserFileDrop();
 
-  // Drag & drop sull'area di upload
-  ['dragenter', 'dragover'].forEach(ev =>
-    els.uploadArea.addEventListener(ev, e => {
-      e.preventDefault();
-      els.uploadArea.classList.add('drag-over');
-    })
-  );
-  ['dragleave', 'drop'].forEach(ev =>
-    els.uploadArea.addEventListener(ev, e => {
-      e.preventDefault();
-      els.uploadArea.classList.remove('drag-over');
-      if (ev === 'drop') {
-        const f = e.dataTransfer.files[0];
-        if (f?.name.toLowerCase().endsWith('.pdf')) handleFile(f);
-      }
-    })
-  );
+  // Input file header e overlay
+  els.pdfInput.addEventListener('change', e => handleFile(e.target.files[0], 'pdf'));
+  els.pdfInputOverlay.addEventListener('change', e => handleFile(e.target.files[0], 'pdf'));
+  els.imageInput.addEventListener('change', e => handleFile(e.target.files[0], 'image'));
+  els.imageInputOverlay.addEventListener('change', e => handleFile(e.target.files[0], 'image'));
+
+  setupUploadArea(els.pdfUploadArea, 'pdf');
+  setupUploadArea(els.imageUploadArea, 'image');
 
   // Navigazione con tasti freccia
   document.addEventListener('keydown', e => {
@@ -133,21 +128,32 @@ document.addEventListener('DOMContentLoaded', () => {
   // Drag & drop sull'area batch
   const dropArea = document.getElementById('batch-drop-area');
   if (dropArea) {
-    ['dragenter', 'dragover'].forEach(ev =>
-      dropArea.addEventListener(ev, e => { e.preventDefault(); dropArea.classList.add('drag-over'); })
-    );
-    ['dragleave', 'drop'].forEach(ev =>
-      dropArea.addEventListener(ev, e => {
-        e.preventDefault();
-        dropArea.classList.remove('drag-over');
-        if (ev === 'drop') {
-          const pdfs = Array.from(e.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
-          if (pdfs.length === 0) { alert('Nessun file PDF trovato nel trascinamento.'); return; }
-          batchState.files = pdfs;
-          renderBatchFileList();
-        }
-      })
-    );
+    resetDropAreaState(dropArea);
+
+    dropArea.addEventListener('dragenter', event => {
+      event.preventDefault();
+      incrementDropAreaState(dropArea);
+    });
+
+    dropArea.addEventListener('dragover', event => {
+      event.preventDefault();
+      dropArea.classList.add('drag-over');
+    });
+
+    dropArea.addEventListener('dragleave', event => {
+      event.preventDefault();
+      decrementDropAreaState(dropArea);
+    });
+
+    dropArea.addEventListener('drop', event => {
+      event.preventDefault();
+      resetDropAreaState(dropArea);
+
+      const pdfs = Array.from(event.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+      if (pdfs.length === 0) { alert('Nessun file PDF trovato nel trascinamento.'); return; }
+      batchState.files = pdfs;
+      renderBatchFileList();
+    });
   }
 });
 
@@ -175,17 +181,140 @@ function setBadge(type, text) {
 }
 
 // ── Upload PDF ────────────────────────────────────────────────────────────────
-function handleFile(file) {
-  if (!file) return;
-  if (!file.name.toLowerCase().endsWith('.pdf')) {
-    alert('Seleziona un file PDF (.pdf).');
-    return;
-  }
-  uploadPdf(file);
+function getFileExtension(filename = '') {
+  const dotIndex = filename.lastIndexOf('.');
+  return dotIndex >= 0 ? filename.slice(dotIndex).toLowerCase() : '';
 }
 
-async function uploadPdf(file) {
-  showLoading('Caricamento e conversione pagine PDF...');
+function getFileKind(file) {
+  const extension = getFileExtension(file?.name || '');
+  if (PDF_EXTENSIONS.includes(extension)) return 'pdf';
+  if (IMAGE_EXTENSIONS.includes(extension)) return 'image';
+  return null;
+}
+
+function eventHasFiles(event) {
+  return Array.from(event.dataTransfer?.types || []).includes('Files');
+}
+
+function getDropZones() {
+  return [
+    els.pdfUploadArea,
+    els.imageUploadArea,
+    document.getElementById('batch-drop-area'),
+  ].filter(Boolean);
+}
+
+function clearAllDropZoneHighlights() {
+  getDropZones().forEach(resetDropAreaState);
+}
+
+function getHoveredDropZone(event) {
+  const hoveredElement = document.elementFromPoint(event.clientX, event.clientY);
+  return hoveredElement?.closest?.('.upload-area, .batch-drop-area') || null;
+}
+
+function syncFileDragHover(event) {
+  if (!eventHasFiles(event)) {
+    clearAllDropZoneHighlights();
+    return;
+  }
+
+  const hoveredDropZone = getHoveredDropZone(event);
+  getDropZones().forEach(zone => {
+    if (zone === hoveredDropZone) {
+      zone.classList.add('drag-over');
+    } else {
+      resetDropAreaState(zone);
+    }
+  });
+}
+
+function preventBrowserFileDrop() {
+  ['dragenter', 'dragover', 'drop'].forEach(eventName =>
+    window.addEventListener(eventName, event => {
+      if (!eventHasFiles(event)) return;
+      event.preventDefault();
+      syncFileDragHover(event);
+      if (eventName === 'dragover') {
+        event.dataTransfer.dropEffect = 'copy';
+      }
+      if (eventName === 'drop') {
+        clearAllDropZoneHighlights();
+      }
+    })
+  );
+
+  window.addEventListener('dragleave', clearAllDropZoneHighlights);
+  window.addEventListener('dragend', clearAllDropZoneHighlights);
+}
+
+function resetDropAreaState(area) {
+  area.dataset.dragDepth = '0';
+  area.classList.remove('drag-over');
+}
+
+function incrementDropAreaState(area) {
+  const nextDepth = Number(area.dataset.dragDepth || '0') + 1;
+  area.dataset.dragDepth = String(nextDepth);
+  area.classList.add('drag-over');
+}
+
+function decrementDropAreaState(area) {
+  const nextDepth = Math.max(0, Number(area.dataset.dragDepth || '0') - 1);
+  area.dataset.dragDepth = String(nextDepth);
+  if (nextDepth === 0) {
+    area.classList.remove('drag-over');
+  }
+}
+
+function setupUploadArea(area, expectedKind) {
+  if (!area) return;
+
+  resetDropAreaState(area);
+
+  area.addEventListener('dragenter', event => {
+    event.preventDefault();
+    incrementDropAreaState(area);
+  });
+
+  area.addEventListener('dragover', event => {
+    event.preventDefault();
+    area.classList.add('drag-over');
+  });
+
+  area.addEventListener('dragleave', event => {
+    event.preventDefault();
+    decrementDropAreaState(area);
+  });
+
+  area.addEventListener('drop', event => {
+    event.preventDefault();
+    resetDropAreaState(area);
+    handleFile(event.dataTransfer.files[0], expectedKind);
+  });
+}
+
+function handleFile(file, expectedKind = null) {
+  if (!file) return;
+
+  const kind = getFileKind(file);
+  if (!kind || (expectedKind && kind !== expectedKind)) {
+    if (expectedKind === 'pdf') {
+      alert('Seleziona un file PDF (.pdf).');
+    } else if (expectedKind === 'image') {
+      alert('Seleziona un file immagine PNG o JPG.');
+    } else {
+      alert('Seleziona un PDF oppure un file PNG/JPG.');
+    }
+    return;
+  }
+
+  uploadDocument(file, kind);
+}
+
+async function uploadDocument(file, kind) {
+  showLoading(kind === 'pdf' ? 'Caricamento e conversione pagine PDF...' : 'Caricamento immagine...');
   try {
     const form = new FormData();
     form.append('file', file);
@@ -207,6 +336,7 @@ async function uploadPdf(file) {
       currentPage:    0,
       totalPages:     data.page_count,
       filename:       data.filename,
+      sourceType:     data.source_type,
       ocrResults:     {},
       ocrStatuses:    {},
       polls:          {},
@@ -216,7 +346,9 @@ async function uploadPdf(file) {
 
     // Aggiorna UI
     els.docFilename.textContent = data.filename;
-    els.docPages.textContent    = `— ${data.page_count} ${data.page_count === 1 ? 'pagina' : 'pagine'}`;
+    els.docPages.textContent = data.source_type === 'image'
+      ? '— immagine singola'
+      : `— ${data.page_count} ${data.page_count === 1 ? 'pagina' : 'pagine'}`;
     els.docInfo.style.display   = 'flex';
     els.exportBtn.style.display = '';
 
@@ -232,6 +364,8 @@ async function uploadPdf(file) {
     hideLoading();
     els.pdfInput.value        = '';
     els.pdfInputOverlay.value = '';
+    els.imageInput.value = '';
+    els.imageInputOverlay.value = '';
   }
 }
 
@@ -245,6 +379,7 @@ function loadPage(n) {
 
   // Carica immagine pagina (cache-bust con timestamp)
   els.pageImage.src = `/api/page/${state.docId}/${n}?_=${Date.now()}`;
+  els.pageImage.alt = state.sourceType === 'image' ? 'Immagine originale' : `Pagina ${n + 1} del documento`;
 
   updateAllThumbs();
   renderOcrPanel();

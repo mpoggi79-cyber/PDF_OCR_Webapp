@@ -434,9 +434,19 @@ header > .header-actions > label.btn-secondary input { display: none; }
   inset: 50px 0 0 0;
   background: var(--bg);
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   z-index: 20;
+  gap: 20px;
+  padding: 24px;
+  overflow: auto;
+}
+.upload-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: 20px;
+  width: min(980px, 100%);
 }
 .upload-area {
   background: var(--surface);
@@ -444,19 +454,34 @@ header > .header-actions > label.btn-secondary input { display: none; }
   border-radius: 14px;
   padding: 52px 68px;
   text-align: center;
-  max-width: 460px;
-  width: 90%;
-  transition: border-color .2s, background .2s;
+  width: 100%;
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  box-shadow: 0 0 0 rgba(108,99,255,0);
+  transform: translateY(0);
+  transition: border-color .2s, background .2s, box-shadow .2s, transform .2s;
 }
 .upload-area.drag-over {
   border-color: var(--accent);
-  background: var(--surface2);
+  background: linear-gradient(180deg, rgba(108,99,255,.16), rgba(108,99,255,.08));
+  box-shadow: 0 0 0 3px rgba(108,99,255,.22), 0 18px 42px rgba(12,13,20,.34);
+  transform: translateY(-4px) scale(1.01);
+}
+.upload-area-image {
+  border-color: rgba(240,168,58,.35);
+  background: linear-gradient(180deg, rgba(255,255,255,.01), rgba(240,168,58,.05));
 }
 .upload-icon     { font-size: 3.4rem; margin-bottom: 12px; }
 .upload-area h2  { font-size: 1.25rem; margin-bottom: 6px; }
 .upload-area p   { margin-bottom: 20px; }
 .hint            { margin-top: 18px !important; font-size: .78rem; line-height: 1.6; }
 .hint code       { background: var(--surface2); padding: 1px 5px; border-radius: 3px; font-size: .9em; }
+.upload-hint {
+  text-align: center;
+  margin-top: 0 !important;
+}
 
 /* ── Overlay loading ───────────────────────────────────────────────────────── */
 .loading-overlay {
@@ -564,11 +589,13 @@ header > .header-actions > label.btn-secondary input { display: none; }
   flex-direction: column;
   align-items: center;
   gap: 14px;
-  transition: border-color .2s, background .2s;
+  box-shadow: 0 0 0 rgba(108,99,255,0);
+  transition: border-color .2s, background .2s, box-shadow .2s;
 }
 .batch-drop-area.drag-over {
   border-color: var(--accent);
-  background: var(--surface2);
+  background: linear-gradient(180deg, rgba(108,99,255,.18), rgba(108,99,255,.08));
+  box-shadow: 0 0 0 3px rgba(108,99,255,.2), 0 18px 42px rgba(12,13,20,.26);
 }
 
 .batch-pick-btns {
@@ -584,6 +611,18 @@ header > .header-actions > label.btn-secondary input { display: none; }
   justify-content: space-between;
   align-items: center;
   font-size: 0.82rem;
+}
+
+@media (max-width: 900px) {
+  .upload-grid {
+    grid-template-columns: 1fr;
+    width: min(560px, 100%);
+  }
+
+  .upload-area {
+    min-height: 0;
+    padding: 42px 26px;
+  }
 }
 .batch-file-count-label {
   font-weight: 600;

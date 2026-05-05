@@ -18,7 +18,7 @@ Da PDF a Markdown, in locale, con un'esperienza veloce e concreta.
 
 ## Quick Start
 
-1. Avvia Ollama in locale e assicurati di avere disponibile il modello glm-ocr.
+1. Avvia Ollama in locale e assicurati di avere disponibile il modello glm-ocr. (ollama pull glm-ocr:latest)
 2. Esegui start.bat per creare l'ambiente e avviare il server.
 3. Apri l'app nel browser e carica uno o piu' PDF.
 4. Avvia l'OCR sulle pagine o sull'intero batch.

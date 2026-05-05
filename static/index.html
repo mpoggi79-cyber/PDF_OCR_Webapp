@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PDF → Markdown OCR</title>
+  <title>PDF / Immagini → Markdown OCR</title>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <link rel="stylesheet" href="/static/style.css">
-  <link rel="stylesheet" href="/static/tooltip.css">
+  <link rel="stylesheet" href="/static/style.css?v=20260506b">
+  <link rel="stylesheet" href="/static/tooltip.css?v=20260506b">
 </head>
 <body>
 
@@ -32,6 +32,11 @@
         📂 Nuovo PDF
         <input type="file" id="pdf-input" accept=".pdf">
       </label>
+      <label class="btn-secondary"
+             data-tooltip="Carica una nuova immagine da elaborare.&#10;Il documento corrente verrà sostituito.&#10;Formati accettati: .png, .jpg, .jpeg">
+        🖼 Nuova immagine
+        <input type="file" id="image-input" accept=".png,.jpg,.jpeg">
+      </label>
     </div>
   </header>
 
@@ -52,7 +57,7 @@
       </div>
 
       <div class="panel-body img-body">
-        <img id="page-image" alt="Pagina PDF">
+        <img id="page-image" alt="Pagina documento">
       </div>
 
       <!-- Striscia miniature pagine -->
@@ -93,18 +98,31 @@
 
   <!-- ── Overlay di caricamento iniziale ────────────────────────────── -->
   <div id="upload-overlay" class="upload-overlay">
-    <div id="upload-area" class="upload-area">
-      <div class="upload-icon">📄</div>
-      <h2>Carica un PDF</h2>
-      <p class="muted">Trascina un file PDF qui, oppure</p>
-      <label class="btn-primary upload-label">
-        Seleziona file
-        <input type="file" id="pdf-input-overlay" accept=".pdf">
-      </label>
-      <p class="muted hint">
-        Assicurati che Ollama sia in esecuzione con<br>
-        <code>ollama serve</code> e il modello <code>glm-ocr:latest</code>
-      </p>
+    <div class="upload-grid">
+      <div id="pdf-upload-area" class="upload-area">
+        <div class="upload-icon">📄</div>
+        <h2>Carica un PDF</h2>
+        <p class="muted">Trascina un file PDF qui, oppure</p>
+        <label class="btn-primary upload-label">
+          Seleziona PDF
+          <input type="file" id="pdf-input-overlay" accept=".pdf">
+        </label>
+      </div>
+
+      <div id="image-upload-area" class="upload-area upload-area-image">
+        <div class="upload-icon">🖼</div>
+        <h2>Carica un'immagine</h2>
+        <p class="muted">Trascina PNG o JPG qui, oppure</p>
+        <label class="btn-primary upload-label">
+          Seleziona immagine
+          <input type="file" id="image-input-overlay" accept=".png,.jpg,.jpeg">
+        </label>
+      </div>
+    </div>
+    <p class="muted hint upload-hint">
+      Assicurati che Ollama sia in esecuzione con<br>
+      <code>ollama serve</code> e il modello <code>glm-ocr:latest</code>
+    </p>
     </div>
   </div>
 
@@ -187,7 +205,7 @@
     </div>
   </div>
 
-  <script src="/static/tooltip.js"></script>
-  <script src="/static/app.js"></script>
+  <script src="/static/tooltip.js?v=20260506b"></script>
+  <script src="/static/app.js?v=20260506b"></script>
 </body>
 </html>
