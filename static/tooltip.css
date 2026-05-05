@@ -1,0 +1,62 @@
+/* ── Tooltip personalizzato ──────────────────────────────────────────────────
+   Attivato dall'attributo  data-tooltip="..."  su qualsiasi elemento.
+   Supporta testo multi-riga (a capo con \n nel valore dell'attributo).
+────────────────────────────────────────────────────────────────────────────── */
+
+#tt-box {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+
+  background: #0d0f1c;
+  color: #dde0f0;
+  border: 1px solid #3d4270;
+  border-radius: 7px;
+  padding: 8px 13px;
+  font-size: 0.75rem;
+  line-height: 1.65;
+  white-space: pre;          /* rispetta i \n nel testo */
+  max-width: 280px;
+  white-space: pre-wrap;
+  box-shadow: 0 6px 24px rgba(0,0,0,.65);
+
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .18s ease, transform .18s ease;
+}
+
+#tt-box.tt-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Freccia direzionale */
+#tt-box::before {
+  content: '';
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  background: #0d0f1c;
+  border: 1px solid #3d4270;
+  transform: rotate(45deg);
+}
+
+#tt-box.tt-below::before {
+  top: -4px; left: 14px;
+  border-right: none; border-bottom: none;
+}
+#tt-box.tt-above::before {
+  bottom: -4px; left: 14px;
+  border-left: none; border-top: none;
+}
+
+/* Evidenzia il titolo della prima riga in colore accento */
+#tt-box .tt-title {
+  color: #a0b4ff;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 3px;
+}
+
+/* Label con toggle: cursore appropriato */
+label[data-tooltip] { cursor: help; }

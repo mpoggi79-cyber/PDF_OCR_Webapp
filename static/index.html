@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF → Markdown OCR</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/tooltip.css">
+</head>
+<body>
+
+  <!-- ── Header ─────────────────────────────────────────────────────── -->
+  <header>
+    <span class="logo">PDF OCR</span>
+
+    <div id="doc-info" class="doc-info" style="display:none">
+      <span id="doc-filename"></span>
+      <span id="doc-pages" class="muted"></span>
+    </div>
+
+    <div class="header-actions">
+      <span id="status-bar" class="status-bar"></span>
+      <span id="ollama-badge" class="badge badge-checking"
+            data-tooltip="Stato del servizio Ollama locale.&#10;Verde = OK, il modello glm-ocr è disponibile.&#10;Giallo = Ollama attivo ma modello non trovato.&#10;Rosso = Ollama non raggiungibile.&#10;Assicurati di aver eseguito 'ollama serve'.">● Ollama</span>
+      <button id="export-btn" onclick="exportAll()" style="display:none"
+              data-tooltip="Esporta tutte le pagine già elaborate come&#10;un unico file Markdown (.md).&#10;Solo le pagine con OCR completato&#10;vengono incluse nel file.">⬇ Esporta MD</button>
+      <button id="batch-btn" onclick="openBatch()"
+              data-tooltip="Apri la modalità Batch per convertire&#10;una cartella intera di file PDF.&#10;Puoi avviare l'OCR su tutti i file,&#10;monitorare il progresso e scaricare&#10;il report e i risultati in ZIP.">📁 Batch PDF</button>
+      <label class="btn-secondary"
+             data-tooltip="Carica un nuovo file PDF da elaborare.&#10;Il documento corrente verrà sostituito.&#10;Formato accettato: .pdf">
+        📂 Nuovo PDF
+        <input type="file" id="pdf-input" accept=".pdf">
+      </label>
+    </div>
+  </header>
+
+  <!-- ── Vista principale (split) ───────────────────────────────────── -->
+  <div id="main-container" class="main-container" style="display:none">
+
+    <!-- Pannello sinistro: visualizzatore PDF -->
+    <div class="panel left-panel">
+      <div class="panel-header">
+        <span>Documento originale</span>
+        <div class="nav-row">
+          <button id="prev-btn" onclick="changePage(-1)"
+                  data-tooltip="Vai alla pagina precedente.&#10;Scorciatoia: tasto ← (freccia sinistra)">◀</button>
+          <span id="page-indicator">1 / 1</span>
+          <button id="next-btn" onclick="changePage(1)"
+                  data-tooltip="Vai alla pagina successiva.&#10;Scorciatoia: tasto → (freccia destra)">▶</button>
+        </div>
+      </div>
+
+      <div class="panel-body img-body">
+        <img id="page-image" alt="Pagina PDF">
+      </div>
+
+      <!-- Striscia miniature pagine -->
+      <div id="page-strip" class="page-strip"></div>
+    </div>
+
+    <!-- Divisore ridimensionabile -->
+    <div class="divider" id="divider"></div>
+
+    <!-- Pannello destro: risultato OCR -->
+    <div class="panel right-panel">
+      <div class="panel-header">
+        <span>Risultato OCR — Markdown</span>
+        <div class="ocr-controls">
+          <button id="ocr-btn" onclick="runOcr()"
+                  data-tooltip="Avvia l'OCR sulla pagina corrente.&#10;L'immagine viene inviata al modello glm-ocr&#10;tramite Ollama e il risultato appare a destra&#10;in formato Markdown.&#10;L'elaborazione può richiedere alcuni secondi.">▶ Esegui OCR</button>
+          <button id="ocr-all-btn" onclick="runOcrAll()"
+                  data-tooltip="Avvia l'OCR su TUTTE le pagine&#10;del documento in background.&#10;Le pagine già elaborate vengono saltate.&#10;Il progresso è visibile nella striscia&#10;delle miniature in basso a sinistra.">⚡ Tutto</button>
+          <button id="copy-btn" onclick="copyMarkdown()" disabled
+                  data-tooltip="Copia il Markdown della pagina corrente&#10;negli appunti, pronto per essere incollato&#10;in qualsiasi editor di testo.">📋 Copia</button>
+          <label class="toggle"
+                 data-tooltip="Attiva/disattiva la modalità Raw.&#10;OFF → visualizza il Markdown formattato (titoli, tabelle, grassetto ecc.)&#10;ON  → mostra il codice Markdown grezzo, utile per copiare o correggere.">
+            <input type="checkbox" id="raw-toggle" onchange="toggleRaw()">
+            <span>Raw</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="panel-body" id="ocr-panel-body">
+        <div id="ocr-placeholder" class="placeholder">
+          Clicca "Esegui OCR" per convertire questa pagina
+        </div>
+        <div id="ocr-rendered" class="md-content"  style="display:none"></div>
+        <pre id="ocr-raw"      class="raw-content" style="display:none"></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Overlay di caricamento iniziale ────────────────────────────── -->
+  <div id="upload-overlay" class="upload-overlay">
+    <div id="upload-area" class="upload-area">
+      <div class="upload-icon">📄</div>
+      <h2>Carica un PDF</h2>
+      <p class="muted">Trascina un file PDF qui, oppure</p>
+      <label class="btn-primary upload-label">
+        Seleziona file
+        <input type="file" id="pdf-input-overlay" accept=".pdf">
+      </label>
+      <p class="muted hint">
+        Assicurati che Ollama sia in esecuzione con<br>
+        <code>ollama serve</code> e il modello <code>glm-ocr:latest</code>
+      </p>
+    </div>
+  </div>
+
+  <!-- ── Overlay di caricamento/elaborazione ────────────────────────── -->
+  <div id="loading-overlay" class="loading-overlay" style="display:none">
+    <div class="spinner-large"></div>
+    <p id="loading-text">Caricamento...</p>
+  </div>
+
+  <!-- ── Overlay modalità Batch ─────────────────────────────────────── -->
+  <div id="batch-overlay" class="batch-overlay" style="display:none">
+    <div class="batch-panel">
+
+      <!-- Intestazione -->
+      <div class="batch-header">
+        <h2>📁 Conversione Batch PDF</h2>
+        <button class="batch-close" onclick="closeBatch()" title="Chiudi">✕</button>
+      </div>
+
+      <!-- Step 1: selezione file/cartella -->
+      <div id="batch-step-select" class="batch-step">
+        <div id="batch-drop-area" class="batch-drop-area">
+          <div class="upload-icon">📂</div>
+          <p>Seleziona una cartella oppure più file PDF</p>
+          <div class="batch-pick-btns">
+            <label class="btn-primary">
+              Apri Cartella
+              <input type="file" id="folder-input" webkitdirectory multiple>
+            </label>
+            <label class="btn-secondary">
+              Seleziona File PDF
+              <input type="file" id="files-input" multiple accept=".pdf">
+            </label>
+          </div>
+          <p class="muted hint">oppure trascina qui i file PDF</p>
+        </div>
+
+        <div id="batch-file-list" style="display:none">
+          <div class="batch-file-list-header">
+            <span id="batch-file-count" class="batch-file-count-label"></span>
+            <button class="btn-secondary" onclick="clearBatchFiles()">✕ Svuota selezione</button>
+          </div>
+          <div id="batch-files-table-wrap" class="batch-table-wrap"></div>
+          <div class="batch-actions">
+            <button id="batch-start-btn" class="btn-primary" onclick="startBatch()">
+              ▶ Avvia Conversione Batch
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2: progresso e risultati -->
+      <div id="batch-step-progress" class="batch-step" style="display:none">
+        <div class="batch-progress-header">
+          <span id="batch-progress-label">Conversione in corso…</span>
+          <div class="batch-progress-bar-wrap">
+            <div class="batch-overall-bar">
+              <div id="batch-overall-fill" class="batch-overall-fill" style="width:0%"></div>
+            </div>
+            <span id="batch-progress-pct">0%</span>
+          </div>
+        </div>
+        <div id="batch-progress-table-wrap" class="batch-table-wrap"></div>
+        <div id="batch-result-actions" class="batch-actions" style="display:none">
+          <button class="btn-secondary" onclick="downloadBatchReport()"
+                  data-tooltip="Scarica il report di conversione in formato Markdown.&#10;Contiene il sommario (totale file, completati, errori)&#10;e la tabella dettagliata per ogni file elaborato.">
+            📄 Scarica Report (.md)
+          </button>
+          <button class="btn-secondary" onclick="downloadBatchZip()"
+                  data-tooltip="Scarica un archivio ZIP con tutti i file Markdown&#10;prodotti dalla conversione OCR.&#10;Ogni PDF diventa un file .md; è incluso anche&#10;il log interno _report.md con l'esito per file.">
+            ⬇ Scarica ZIP (tutti i Markdown)
+          </button>
+          <button class="btn-secondary" onclick="resetBatchToStep1()"
+                  data-tooltip="Azzera la sessione batch corrente e&#10;torna alla schermata di selezione file,&#10;pronto per una nuova conversione.">
+            🔄 Nuova Sessione Batch
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="/static/tooltip.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
