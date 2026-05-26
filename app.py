@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import time
 from typing import List
 
 import httpx
@@ -23,7 +25,7 @@ from backend.documents import (
     get_page_image_path,
     save_uploaded_document,
 )
-from backend.ocr import get_ocr_payload, start_ocr_payload
+from backend.ocr import get_document_job_payload, get_ocr_payload, queue_document_ocr, start_ocr_payload
 from backend.state import rebuild_ocr_status
 
 app = FastAPI(title="PDF OCR Webapp")
@@ -84,6 +86,16 @@ async def get_ocr(doc_id: str, page_num: int) -> JSONResponse:
     return JSONResponse(get_ocr_payload(doc_id, page_num))
 
 
+@app.get("/api/ocr-job/{doc_id}")
+async def get_document_ocr_job(doc_id: str) -> JSONResponse:
+    return JSONResponse(get_document_job_payload(doc_id))
+
+
+@app.post("/api/ocr-job/{doc_id}")
+async def start_document_ocr_job(doc_id: str, background_tasks: BackgroundTasks) -> JSONResponse:
+    return JSONResponse(queue_document_ocr(background_tasks, doc_id))
+
+
 @app.post("/api/ocr/{doc_id}/{page_num}")
 async def start_ocr(
     doc_id: str,
@@ -126,6 +138,18 @@ async def export_batch_zip(batch_id: str) -> StreamingResponse:
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{zip_name}"'},
     )
+
+
+@app.post("/api/shutdown")
+async def shutdown(background_tasks: BackgroundTasks) -> JSONResponse:
+    """Chiude il server locale dopo aver inviato la risposta al client."""
+
+    def _shutdown() -> None:
+        time.sleep(0.5)
+        os._exit(0)
+
+    background_tasks.add_task(_shutdown)
+    return JSONResponse({"detail": "shutting down"})
 
 
 app.mount("/static", StaticFiles(directory="static"), name="static")

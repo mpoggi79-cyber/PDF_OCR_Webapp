@@ -8,9 +8,34 @@ from pathlib import Path
 
 from fastapi import BackgroundTasks, HTTPException, UploadFile
 
+from backend.config import OCR_BLOCK_SIZE
 from backend.documents import build_document_markdown, save_uploaded_document
-from backend.ocr import queue_ocr_page
-from backend.state import batch_registry, ocr_status
+from backend.ocr import queue_document_ocr
+from backend.state import (
+    batch_registry,
+    get_or_load_batch_docs,
+    ocr_jobs,
+    ocr_status,
+    read_batch_state,
+    save_batch_state,
+)
+
+
+def _get_batch_docs_or_404(batch_id: str) -> list[dict]:
+    docs = get_or_load_batch_docs(batch_id)
+    if docs is None:
+        raise HTTPException(status_code=404, detail="Batch non trovato.")
+    return docs
+
+
+def _persist_batch_snapshot(batch_id: str, docs: list[dict], status: str) -> None:
+    persisted = read_batch_state(batch_id) or {}
+    save_batch_state(
+        batch_id,
+        docs,
+        created_at=persisted.get("created_at"),
+        status=status,
+    )
 
 
 async def upload_batch(files: list[UploadFile]) -> dict:
@@ -37,22 +62,30 @@ async def upload_batch(files: list[UploadFile]) -> dict:
         )
 
     batch_registry[batch_id] = docs
+    _persist_batch_snapshot(batch_id, docs, status="pending")
     return {"batch_id": batch_id, "docs": docs, "errors": errors}
 
 
 def start_batch_ocr(background_tasks: BackgroundTasks, batch_id: str) -> dict:
-    docs = batch_registry.get(batch_id)
-    if docs is None:
-        raise HTTPException(status_code=404, detail="Batch non trovato.")
+    docs = _get_batch_docs_or_404(batch_id)
 
+    jobs_started = 0
     pages_queued = 0
     for doc in docs:
-        doc_id = doc["doc_id"]
-        for page_num in range(doc["page_count"]):
-            if queue_ocr_page(background_tasks, doc_id, page_num):
-                pages_queued += 1
+        job = queue_document_ocr(background_tasks, doc["doc_id"], batch_id=batch_id)
+        pages_queued += job.get("pending_pages", 0)
+        if job.get("scheduled"):
+            jobs_started += 1
 
-    return {"batch_id": batch_id, "pages_queued": pages_queued}
+    snapshot_status = "processing" if pages_queued > 0 else "pending"
+    _persist_batch_snapshot(batch_id, docs, status=snapshot_status)
+
+    return {
+        "batch_id": batch_id,
+        "pages_queued": pages_queued,
+        "jobs_started": jobs_started,
+        "block_size": OCR_BLOCK_SIZE,
+    }
 
 
 def _get_page_counts(doc_id: str, page_count: int) -> tuple[int, int, int]:
@@ -71,7 +104,7 @@ def _resolve_doc_status(
 ) -> str:
     if pages_done == page_count:
         return "done"
-    if pages_processing > 0 or (0 < pages_done < page_count):
+    if pages_processing > 0:
         return "processing"
     if pages_error == page_count:
         return "error"
@@ -80,10 +113,28 @@ def _resolve_doc_status(
     return "pending"
 
 
+def _resolve_batch_status(docs: list[dict]) -> str:
+    if not docs:
+        return "pending"
+
+    statuses = [doc["status"] for doc in docs]
+    if all(status == "done" for status in statuses):
+        return "done"
+    if any(status == "processing" for status in statuses):
+        return "processing"
+    if all(status == "error" for status in statuses):
+        return "error"
+    if any(status == "pending" for status in statuses):
+        return "pending"
+    if any(status == "partial" for status in statuses):
+        return "partial"
+    if any(status == "error" for status in statuses):
+        return "partial"
+    return "pending"
+
+
 def get_batch_status_payload(batch_id: str) -> dict:
-    docs = batch_registry.get(batch_id)
-    if docs is None:
-        raise HTTPException(status_code=404, detail="Batch non trovato.")
+    docs = _get_batch_docs_or_404(batch_id)
 
     result: list[dict] = []
     for doc in docs:
@@ -91,6 +142,16 @@ def get_batch_status_payload(batch_id: str) -> dict:
             doc["doc_id"],
             doc["page_count"],
         )
+        job_status = (ocr_jobs.get(doc["doc_id"]) or {}).get("status")
+        status = _resolve_doc_status(
+            doc["page_count"],
+            pages_done,
+            pages_error,
+            pages_processing,
+        )
+        if job_status in {"queued", "processing"} and status == "pending":
+            status = "processing"
+
         result.append(
             {
                 "doc_id": doc["doc_id"],
@@ -98,22 +159,17 @@ def get_batch_status_payload(batch_id: str) -> dict:
                 "page_count": doc["page_count"],
                 "pages_done": pages_done,
                 "pages_error": pages_error,
-                "status": _resolve_doc_status(
-                    doc["page_count"],
-                    pages_done,
-                    pages_error,
-                    pages_processing,
-                ),
+                "status": status,
             }
         )
 
-    return {"batch_id": batch_id, "docs": result}
+    batch_status = _resolve_batch_status(result)
+    _persist_batch_snapshot(batch_id, docs, status=batch_status)
+    return {"batch_id": batch_id, "status": batch_status, "docs": result}
 
 
 def get_batch_report_payload(batch_id: str) -> dict:
-    docs = batch_registry.get(batch_id)
-    if docs is None:
-        raise HTTPException(status_code=404, detail="Batch non trovato.")
+    docs = _get_batch_docs_or_404(batch_id)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     total = len(docs)
@@ -176,9 +232,7 @@ def get_batch_report_payload(batch_id: str) -> dict:
 
 
 def export_batch_zip_payload(batch_id: str) -> tuple[io.BytesIO, str]:
-    docs = batch_registry.get(batch_id)
-    if docs is None:
-        raise HTTPException(status_code=404, detail="Batch non trovato.")
+    docs = _get_batch_docs_or_404(batch_id)
 
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:

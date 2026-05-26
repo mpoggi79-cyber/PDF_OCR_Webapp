@@ -7,8 +7,12 @@ const state = {
   totalPages:  0,
   filename:    '',
   sourceType:  null,
+  documentJob: null,
+  documentJobPoll: null,
   /** @type {Object.<number, string>} page → markdown */
   ocrResults:  {},
+  /** @type {Object.<number, Object|null>} page → dettaglio errore OCR */
+  ocrErrors:   {},
   /** @type {Object.<number, string>} page → 'pending'|'processing'|'done'|'error' */
   ocrStatuses: {},
   /** @type {Object.<number, number>} page → setInterval id */
@@ -44,6 +48,49 @@ function fmtElapsed(sec) {
   const m = String(Math.floor(sec / 60)).padStart(2, '0');
   const s = String(sec % 60).padStart(2, '0');
   return `${m}:${s}`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function buildOcrErrorHtml(error) {
+  if (!error) return null;
+
+  const sourceLabel = error.source === 'ollama' ? 'Ollama / modello' : 'Backend';
+  const retryLabel  = error.retryable ? 'Sì' : 'No';
+  const interpretation = escapeHtml(error.interpretation || 'Nessuna interpretazione disponibile.');
+  const detail = escapeHtml(error.detail || 'Nessun dettaglio tecnico disponibile.');
+  const label = escapeHtml(error.label || 'Errore OCR');
+  const type = escapeHtml(error.type || 'unknown');
+
+  return `
+    <div class="ocr-error-card">
+      <div class="ocr-error-header">
+        <span class="ocr-error-icon">❌</span>
+        <div>
+          <div class="ocr-error-title">${label}</div>
+          <div class="ocr-error-meta">${escapeHtml(sourceLabel)} · <code>${type}</code></div>
+        </div>
+      </div>
+      <div class="ocr-error-section">
+        <div class="ocr-error-label">Interpretazione</div>
+        <p>${interpretation}</p>
+      </div>
+      <div class="ocr-error-section">
+        <div class="ocr-error-label">Riprova consigliata</div>
+        <p>${escapeHtml(retryLabel)}</p>
+      </div>
+      <div class="ocr-error-section">
+        <div class="ocr-error-label">Dettaglio tecnico</div>
+        <pre class="ocr-error-detail">${detail}</pre>
+      </div>
+    </div>`;
 }
 
 // ── Riferimenti DOM ───────────────────────────────────────────────────────────
@@ -328,6 +375,7 @@ async function uploadDocument(file, kind) {
 
     // Ferma eventuali polling e timer in corso
     Object.values(state.polls).forEach(clearInterval);
+    stopDocumentJobPolling();
     stopDisplayTimer();
 
     // Aggiorna stato
@@ -337,6 +385,8 @@ async function uploadDocument(file, kind) {
       totalPages:     data.page_count,
       filename:       data.filename,
       sourceType:     data.source_type,
+      documentJob:    null,
+      documentJobPoll:null,
       ocrResults:     {},
       ocrStatuses:    {},
       polls:          {},
@@ -429,6 +479,7 @@ function renderOcrPanel() {
   const page    = state.currentPage;
   const status  = state.ocrStatuses[page] ?? 'pending';
   const md      = state.ocrResults[page];
+  const error   = state.ocrErrors[page] ?? null;
   const showRaw = els.rawToggle.checked;
 
   // Reset
@@ -438,7 +489,14 @@ function renderOcrPanel() {
   els.copyBtn.disabled             = true;
   els.ocrBtn.disabled              = false;
 
-  if (md !== undefined) {
+  if (status === 'error' && !showRaw) {
+    els.ocrPlaceholder.style.display = 'flex';
+    const errorHtml = buildOcrErrorHtml(error);
+    els.ocrPlaceholder.innerHTML = errorHtml || '❌ Errore OCR. Riprova.';
+    els.ocrBtn.textContent = '🔄 Riprova OCR';
+    els.ocrBtn.disabled    = false;
+
+  } else if (md !== undefined) {
     // Risultato disponibile
     els.copyBtn.disabled = false;
     if (showRaw) {
@@ -490,11 +548,6 @@ function renderOcrPanel() {
     els.ocrBtn.disabled    = true;
     startDisplayTimer();
 
-  } else if (status === 'error') {
-    els.ocrPlaceholder.style.display = 'flex';
-    els.ocrPlaceholder.textContent   = '❌ Errore OCR. Riprova.';
-    els.ocrBtn.textContent           = '▶ Esegui OCR';
-
   } else {
     els.ocrPlaceholder.style.display = 'flex';
     els.ocrPlaceholder.textContent   =
@@ -513,14 +566,19 @@ async function runOcr() {
 
 async function runOcrAll() {
   if (!state.docId) return;
-  setStatus(`Avvio OCR per tutte le ${state.totalPages} pagine…`);
+  try {
+    const res  = await fetch(`/api/ocr-job/${state.docId}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
 
-  for (let i = 0; i < state.totalPages; i++) {
-    if (state.ocrResults[i] !== undefined) continue;
-    if (state.ocrStatuses[i] === 'processing') continue;
-    await triggerOcr(i);
+    state.documentJob = data;
+    updateOcrAllButton();
+    await syncDocumentStatuses();
+    startDocumentJobPolling();
+    setStatus(`OCR documento avviato a blocchi da ${data.block_size || 10} pagine.`);
+  } catch (e) {
+    alert('Errore avvio OCR completo: ' + e.message);
   }
-  setStatus('OCR avviato su tutte le pagine. Attendere i risultati…');
   renderOcrPanel();
   updateAllThumbs();
 }
@@ -528,6 +586,7 @@ async function runOcrAll() {
 async function triggerOcr(page) {
   if (state.ocrStatuses[page] === 'processing') return;
   state.ocrStatuses[page]   = 'processing';
+  delete state.ocrErrors[page];
   state.ocrStartTimes[page] = Date.now();   // registra inizio
   if (page === state.currentPage) { renderOcrPanel(); startDisplayTimer(); }
   updateAllThumbs();
@@ -539,6 +598,13 @@ async function triggerOcr(page) {
     if (data.status === 'done' && data.markdown != null) {
       state.ocrResults[page]  = data.markdown;
       state.ocrStatuses[page] = 'done';
+      delete state.ocrErrors[page];
+      if (page === state.currentPage) renderOcrPanel();
+      updateAllThumbs();
+    } else if (data.status === 'error') {
+      state.ocrStatuses[page] = 'error';
+      state.ocrResults[page]  = data.markdown ?? state.ocrResults[page];
+      state.ocrErrors[page]   = data.error ?? null;
       if (page === state.currentPage) renderOcrPanel();
       updateAllThumbs();
     } else {
@@ -547,6 +613,14 @@ async function triggerOcr(page) {
     }
   } catch (e) {
     state.ocrStatuses[page] = 'error';
+    state.ocrErrors[page] = {
+      source: 'frontend',
+      type: 'request_error',
+      label: 'Errore di richiesta dal browser',
+      interpretation: 'La richiesta OCR non è stata completata dal browser o dal server HTTP prima di ricevere una risposta valida.',
+      detail: e.message || String(e),
+      retryable: true,
+    };
     if (page === state.currentPage) renderOcrPanel();
     updateAllThumbs();
   }
@@ -571,6 +645,7 @@ function startPolling(page) {
         }
         state.ocrResults[page]  = data.markdown;
         state.ocrStatuses[page] = 'done';
+        delete state.ocrErrors[page];
         clearInterval(state.polls[page]);
         delete state.polls[page];
         const sec = state.ocrStartTimes[page]
@@ -582,13 +657,126 @@ function startPolling(page) {
 
       } else if (data.status === 'error') {
         state.ocrStatuses[page] = 'error';
+        if (data.markdown != null) {
+          state.ocrResults[page] = data.markdown;
+        }
+        state.ocrErrors[page] = data.error ?? null;
         clearInterval(state.polls[page]);
         delete state.polls[page];
+        setStatus(`✗ Pagina ${page + 1} fallita: ${data.error?.label || 'Errore OCR'}.`);
         if (page === state.currentPage) { stopDisplayTimer(); renderOcrPanel(); }
         updateAllThumbs();
       }
     } catch (_) { /* ignora errori di rete transitori */ }
   }, 2500);
+}
+
+function updateOcrAllButton() {
+  const job = state.documentJob;
+  if (!job || !state.docId) {
+    els.ocrAllBtn.disabled = false;
+    els.ocrAllBtn.textContent = '⚡ Tutto';
+    return;
+  }
+
+  if (job.status === 'queued' || job.status === 'processing') {
+    const completed = (job.done_pages || 0) + (job.error_pages || 0);
+    let label = `⏳ Tutto ${completed}/${job.total_pages}`;
+    if (job.current_block) {
+      label += ` · ${job.current_block.start_page}-${job.current_block.end_page}`;
+    }
+    els.ocrAllBtn.disabled = true;
+    els.ocrAllBtn.textContent = label;
+    return;
+  }
+
+  els.ocrAllBtn.disabled = false;
+  els.ocrAllBtn.textContent = '⚡ Tutto';
+}
+
+function stopDocumentJobPolling() {
+  if (state.documentJobPoll) {
+    clearInterval(state.documentJobPoll);
+    state.documentJobPoll = null;
+  }
+  state.documentJob = null;
+  updateOcrAllButton();
+}
+
+function startDocumentJobPolling() {
+  if (state.documentJobPoll || !state.docId) return;
+  state.documentJobPoll = setInterval(() => {
+    pollDocumentJob().catch(() => {});
+  }, 2500);
+}
+
+async function loadOcrResult(page) {
+  const res  = await fetch(`/api/ocr/${state.docId}/${page}`);
+  const data = await res.json();
+
+  state.ocrStatuses[page] = data.status;
+  if (data.markdown != null) {
+    state.ocrResults[page] = data.markdown;
+  }
+  state.ocrErrors[page] = data.error ?? null;
+
+  if (page === state.currentPage) {
+    if (data.status !== 'processing') stopDisplayTimer();
+    renderOcrPanel();
+  }
+  updateAllThumbs();
+}
+
+async function syncDocumentStatuses() {
+  if (!state.docId) return;
+
+  const res  = await fetch(`/api/documents/${state.docId}`);
+  const data = await res.json();
+  const nextStatuses = data.ocr_status || {};
+
+  for (const [pageKey, status] of Object.entries(nextStatuses)) {
+    const page = Number(pageKey);
+    const previous = state.ocrStatuses[page];
+    state.ocrStatuses[page] = status;
+
+    if (status === 'processing' && previous !== 'processing') {
+      state.ocrStartTimes[page] = Date.now();
+      if (page === state.currentPage) startDisplayTimer();
+    }
+
+    if ((status === 'done' || status === 'error') && previous === 'processing' && state.ocrStartTimes[page]) {
+      const duration = Date.now() - state.ocrStartTimes[page];
+      if (duration > 0) {
+        state.ocrDurations.push(duration);
+        if (state.ocrDurations.length > 6) state.ocrDurations.shift();
+      }
+    }
+
+    if ((status === 'done' || status === 'error') && state.ocrResults[page] === undefined) {
+      await loadOcrResult(page);
+    }
+  }
+
+  if (state.ocrStatuses[state.currentPage] !== 'processing') stopDisplayTimer();
+  renderOcrPanel();
+  updateAllThumbs();
+}
+
+async function pollDocumentJob() {
+  if (!state.docId) return;
+
+  const res  = await fetch(`/api/ocr-job/${state.docId}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+
+  state.documentJob = data;
+  updateOcrAllButton();
+  await syncDocumentStatuses();
+
+  if (['done', 'partial', 'error', 'pending'].includes(data.status)) {
+    stopDocumentJobPolling();
+    setStatus(`OCR documento terminato: ${data.done_pages}/${data.total_pages} pagine OK, ${data.error_pages} errori.`);
+  }
 }
 
 // ── Azioni UI ─────────────────────────────────────────────────────────────────
@@ -805,7 +993,7 @@ async function startBatch() {
     const startData = await startRes.json();
 
     document.getElementById('batch-progress-label').textContent =
-      `OCR avviato su ${startData.pages_queued} pagine in background…`;
+      `OCR avviato per ${startData.jobs_started || data.docs.length} documenti, blocchi da ${startData.block_size || 10} pagine.`;
 
     // Polling
     batchState.pollTimer = setInterval(pollBatchStatus, 3000);
@@ -923,4 +1111,24 @@ function fmtSize(bytes) {
   if (bytes < 1024)        return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
   return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+}
+
+// ── Funzione EXIT ────────────────────────────────────────────────────────────
+
+async function exitApp() {
+  if (!confirm('Chiudere il server e uscire?')) return;
+  setStatus('Chiusura server in corso…');
+  try {
+    const res = await fetch('/api/shutdown', { method: 'POST' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.detail || `HTTP ${res.status}`);
+    }
+
+    setStatus('Server arrestato. Chiusura pagina…');
+    setTimeout(() => { window.location.replace('about:blank'); }, 400);
+  } catch (err) {
+    alert('Impossibile arrestare il server: ' + err.message);
+    setStatus('Arresto server fallito.');
+  }
 }

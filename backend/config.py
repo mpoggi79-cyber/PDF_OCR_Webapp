@@ -6,6 +6,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL_NAME = "glm-ocr:latest"
 OCR_TIMEOUT = 240.0
+OCR_BLOCK_SIZE = 10
 
 OCR_PROMPT = (
     "Extract all text, tables, and structure from this document image. "

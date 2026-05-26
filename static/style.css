@@ -355,6 +355,81 @@ header > .header-actions > label.btn-secondary input { display: none; }
   letter-spacing: 0.02em;
 }
 
+.ocr-error-card {
+  width: 100%;
+  max-width: 560px;
+  background: rgba(120, 24, 24, 0.22);
+  border: 1px solid rgba(255, 116, 116, 0.28);
+  border-radius: 12px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: #ffd7d7;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}
+
+.ocr-error-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.ocr-error-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.ocr-error-title {
+  font-size: 0.96rem;
+  font-weight: 700;
+  color: #ffe4e4;
+}
+
+.ocr-error-meta {
+  margin-top: 2px;
+  font-size: 0.76rem;
+  color: rgba(255, 215, 215, 0.82);
+}
+
+.ocr-error-meta code {
+  background: rgba(255,255,255,0.08);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.ocr-error-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ocr-error-label {
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(255, 215, 215, 0.68);
+}
+
+.ocr-error-section p {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.ocr-error-detail {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(20, 10, 10, 0.45);
+  color: #fff0f0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "Cascadia Code","Consolas","Courier New",monospace;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
 /* ── Contenuto Markdown formattato ────────────────────────────────────────── */
 .md-content {
   font-size: 0.875rem;
