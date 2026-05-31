@@ -4,6 +4,14 @@ Trasforma PDF e immagini in Markdown strutturato usando GLM-OCR in locale tramit
 
 PDF OCR Webapp e' una web app locale con backend FastAPI e frontend statico che accetta PDF, PNG, JPG e JPEG, avvia OCR asincrono pagina per pagina, salva i risultati su file system e permette di riprendere i job dopo riavvio del server. L'obiettivo non e' solo completare il job, ma ottenere un output Markdown il piu' fedele possibile a heading, liste, tabelle, formule e layout del documento originale.
 
+In breve:
+
+- local-first: OCR eseguito in locale con Ollama e GLM-OCR
+- output strutturato: Markdown canonico con supporto a metadata OCR opzionali
+- robustezza: retry, diagnostica errori e resume post-crash
+- stack semplice: FastAPI backend e frontend vanilla JS senza build step
+- focus prodotto: massima fedelta' possibile su documenti strutturati, tabelle e moduli
+
 ## Perche' usarlo
 
 - OCR locale con Ollama: nessun servizio cloud obbligatorio.
