@@ -12,6 +12,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.config import (
+    DEFAULT_OCR_PROMPT_PROFILE,
+    MODEL_FALLBACK_NAMES,
+    MODEL_NAME,
+    OLLAMA_TAGS_URL,
+    get_available_prompt_profiles,
+)
+
 from backend.batch import (
     export_batch_zip_payload,
     get_batch_report_payload,
@@ -47,16 +55,27 @@ async def _rebuild_status() -> None:
 async def health() -> JSONResponse:
     """Verifica che Ollama sia raggiungibile e che glm-ocr sia installato."""
     try:
+        configured_models = []
+        for model_name in (MODEL_NAME, *MODEL_FALLBACK_NAMES):
+            if model_name and model_name not in configured_models:
+                configured_models.append(model_name)
+
         async with httpx.AsyncClient(timeout=4.0) as client:
-            response = await client.get("http://localhost:11434/api/tags")
+            response = await client.get(OLLAMA_TAGS_URL)
             response.raise_for_status()
             models = [model.get("name", "") for model in response.json().get("models", [])]
-            glm_ok = any(model.startswith("glm-ocr") for model in models)
+            selected_model = next((name for name in configured_models if name in models), None)
+            if selected_model is None:
+                selected_model = next((name for name in models if name.startswith("glm-ocr")), None)
         return JSONResponse(
             {
                 "ollama": "ok",
-                "glm_ocr": "available" if glm_ok else "not_found",
+                "glm_ocr": "available" if selected_model else "not_found",
+                "configured_models": configured_models,
+                "selected_model": selected_model,
                 "models": models,
+                "prompt_profiles": get_available_prompt_profiles(),
+                "default_prompt_profile": DEFAULT_OCR_PROMPT_PROFILE,
             }
         )
     except Exception as exc:
@@ -64,8 +83,8 @@ async def health() -> JSONResponse:
 
 
 @app.post("/api/upload")
-async def upload_pdf(file: UploadFile = File(...)) -> JSONResponse:
-    return JSONResponse(await save_uploaded_document(file))
+async def upload_pdf(file: UploadFile = File(...), prompt_profile: str | None = None) -> JSONResponse:
+    return JSONResponse(await save_uploaded_document(file, prompt_profile=prompt_profile))
 
 
 @app.get("/api/documents/{doc_id}")
@@ -92,8 +111,12 @@ async def get_document_ocr_job(doc_id: str) -> JSONResponse:
 
 
 @app.post("/api/ocr-job/{doc_id}")
-async def start_document_ocr_job(doc_id: str, background_tasks: BackgroundTasks) -> JSONResponse:
-    return JSONResponse(queue_document_ocr(background_tasks, doc_id))
+async def start_document_ocr_job(
+    doc_id: str,
+    background_tasks: BackgroundTasks,
+    prompt_profile: str | None = None,
+) -> JSONResponse:
+    return JSONResponse(queue_document_ocr(background_tasks, doc_id, prompt_profile=prompt_profile))
 
 
 @app.post("/api/ocr/{doc_id}/{page_num}")
@@ -101,8 +124,9 @@ async def start_ocr(
     doc_id: str,
     page_num: int,
     background_tasks: BackgroundTasks,
+    prompt_profile: str | None = None,
 ) -> JSONResponse:
-    return JSONResponse(start_ocr_payload(background_tasks, doc_id, page_num))
+    return JSONResponse(start_ocr_payload(background_tasks, doc_id, page_num, prompt_profile=prompt_profile))
 
 
 @app.get("/api/export/{doc_id}")
@@ -111,13 +135,17 @@ async def export_markdown(doc_id: str) -> JSONResponse:
 
 
 @app.post("/api/batch")
-async def batch_upload(files: List[UploadFile] = File(...)) -> JSONResponse:
-    return JSONResponse(await upload_batch(files))
+async def batch_upload(files: List[UploadFile] = File(...), prompt_profile: str | None = None) -> JSONResponse:
+    return JSONResponse(await upload_batch(files, prompt_profile=prompt_profile))
 
 
 @app.post("/api/batch/{batch_id}/start")
-async def batch_start(batch_id: str, background_tasks: BackgroundTasks) -> JSONResponse:
-    return JSONResponse(start_batch_ocr(background_tasks, batch_id))
+async def batch_start(
+    batch_id: str,
+    background_tasks: BackgroundTasks,
+    prompt_profile: str | None = None,
+) -> JSONResponse:
+    return JSONResponse(start_batch_ocr(background_tasks, batch_id, prompt_profile=prompt_profile))
 
 
 @app.get("/api/batch/{batch_id}")

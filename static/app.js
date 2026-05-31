@@ -13,6 +13,8 @@ const state = {
   ocrResults:  {},
   /** @type {Object.<number, Object|null>} page → dettaglio errore OCR */
   ocrErrors:   {},
+  /** @type {Object.<number, Object|null>} page → payload OCR strutturato opzionale */
+  ocrStructured: {},
   /** @type {Object.<number, string>} page → 'pending'|'processing'|'done'|'error' */
   ocrStatuses: {},
   /** @type {Object.<number, number>} page → setInterval id */
@@ -91,6 +93,44 @@ function buildOcrErrorHtml(error) {
         <pre class="ocr-error-detail">${detail}</pre>
       </div>
     </div>`;
+}
+
+function extractStructuredOcrPayload(data) {
+  if (!data || typeof data !== 'object') return null;
+
+  const payload = {
+    provider: data.provider ?? null,
+    model: data.model ?? null,
+    layoutVisualization: data.layout_visualization ?? null,
+    cropRegions: data.crop_regions ?? null,
+    tableRegions: data.table_regions ?? null,
+    formulaRegions: data.formula_regions ?? null,
+    confidence: data.confidence ?? null,
+    structureMetadata: data.structure_metadata ?? null,
+    rawProviderPayload: data.raw_provider_payload ?? null,
+  };
+
+  const hasStructuredContent = Object.entries(payload)
+    .some(([, value]) => value !== null && value !== undefined);
+
+  return hasStructuredContent ? payload : null;
+}
+
+function applyOcrPayload(page, data) {
+  state.ocrStatuses[page] = data.status;
+
+  if (data.markdown != null) {
+    state.ocrResults[page] = data.markdown;
+  }
+
+  state.ocrErrors[page] = data.error ?? null;
+
+  const structuredPayload = extractStructuredOcrPayload(data);
+  if (structuredPayload) {
+    state.ocrStructured[page] = structuredPayload;
+  } else {
+    delete state.ocrStructured[page];
+  }
 }
 
 // ── Riferimenti DOM ───────────────────────────────────────────────────────────
@@ -388,6 +428,8 @@ async function uploadDocument(file, kind) {
       documentJob:    null,
       documentJobPoll:null,
       ocrResults:     {},
+      ocrErrors:      {},
+      ocrStructured:  {},
       ocrStatuses:    {},
       polls:          {},
       ocrStartTimes:  {},
@@ -587,6 +629,7 @@ async function triggerOcr(page) {
   if (state.ocrStatuses[page] === 'processing') return;
   state.ocrStatuses[page]   = 'processing';
   delete state.ocrErrors[page];
+  delete state.ocrStructured[page];
   state.ocrStartTimes[page] = Date.now();   // registra inizio
   if (page === state.currentPage) { renderOcrPanel(); startDisplayTimer(); }
   updateAllThumbs();
@@ -596,15 +639,11 @@ async function triggerOcr(page) {
     const data = await res.json();
 
     if (data.status === 'done' && data.markdown != null) {
-      state.ocrResults[page]  = data.markdown;
-      state.ocrStatuses[page] = 'done';
-      delete state.ocrErrors[page];
+      applyOcrPayload(page, data);
       if (page === state.currentPage) renderOcrPanel();
       updateAllThumbs();
     } else if (data.status === 'error') {
-      state.ocrStatuses[page] = 'error';
-      state.ocrResults[page]  = data.markdown ?? state.ocrResults[page];
-      state.ocrErrors[page]   = data.error ?? null;
+      applyOcrPayload(page, data);
       if (page === state.currentPage) renderOcrPanel();
       updateAllThumbs();
     } else {
@@ -613,6 +652,7 @@ async function triggerOcr(page) {
     }
   } catch (e) {
     state.ocrStatuses[page] = 'error';
+    delete state.ocrStructured[page];
     state.ocrErrors[page] = {
       source: 'frontend',
       type: 'request_error',
@@ -643,9 +683,7 @@ function startPolling(page) {
             if (state.ocrDurations.length > 6) state.ocrDurations.shift();
           }
         }
-        state.ocrResults[page]  = data.markdown;
-        state.ocrStatuses[page] = 'done';
-        delete state.ocrErrors[page];
+        applyOcrPayload(page, data);
         clearInterval(state.polls[page]);
         delete state.polls[page];
         const sec = state.ocrStartTimes[page]
@@ -656,11 +694,7 @@ function startPolling(page) {
         updateAllThumbs();
 
       } else if (data.status === 'error') {
-        state.ocrStatuses[page] = 'error';
-        if (data.markdown != null) {
-          state.ocrResults[page] = data.markdown;
-        }
-        state.ocrErrors[page] = data.error ?? null;
+        applyOcrPayload(page, data);
         clearInterval(state.polls[page]);
         delete state.polls[page];
         setStatus(`✗ Pagina ${page + 1} fallita: ${data.error?.label || 'Errore OCR'}.`);
@@ -714,11 +748,7 @@ async function loadOcrResult(page) {
   const res  = await fetch(`/api/ocr/${state.docId}/${page}`);
   const data = await res.json();
 
-  state.ocrStatuses[page] = data.status;
-  if (data.markdown != null) {
-    state.ocrResults[page] = data.markdown;
-  }
-  state.ocrErrors[page] = data.error ?? null;
+  applyOcrPayload(page, data);
 
   if (page === state.currentPage) {
     if (data.status !== 'processing') stopDisplayTimer();

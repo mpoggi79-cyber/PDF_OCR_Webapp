@@ -36,16 +36,14 @@ def _persist_batch_snapshot(batch_id: str, docs: list[dict], status: str) -> Non
         created_at=persisted.get("created_at"),
         status=status,
     )
-
-
-async def upload_batch(files: list[UploadFile]) -> dict:
+async def upload_batch(files: list[UploadFile], *, prompt_profile: str | None = None) -> dict:
     batch_id = str(uuid.uuid4())
     docs: list[dict] = []
     errors: list[dict] = []
 
     for file in files:
         try:
-            metadata = await save_uploaded_document(file, batch_id=batch_id)
+            metadata = await save_uploaded_document(file, batch_id=batch_id, prompt_profile=prompt_profile)
         except HTTPException as exc:
             errors.append({"filename": file.filename, "error": exc.detail})
             continue
@@ -64,15 +62,23 @@ async def upload_batch(files: list[UploadFile]) -> dict:
     batch_registry[batch_id] = docs
     _persist_batch_snapshot(batch_id, docs, status="pending")
     return {"batch_id": batch_id, "docs": docs, "errors": errors}
-
-
-def start_batch_ocr(background_tasks: BackgroundTasks, batch_id: str) -> dict:
+def start_batch_ocr(
+    background_tasks: BackgroundTasks,
+    batch_id: str,
+    *,
+    prompt_profile: str | None = None,
+) -> dict:
     docs = _get_batch_docs_or_404(batch_id)
 
     jobs_started = 0
     pages_queued = 0
     for doc in docs:
-        job = queue_document_ocr(background_tasks, doc["doc_id"], batch_id=batch_id)
+        job = queue_document_ocr(
+            background_tasks,
+            doc["doc_id"],
+            batch_id=batch_id,
+            prompt_profile=prompt_profile,
+        )
         pages_queued += job.get("pending_pages", 0)
         if job.get("scheduled"):
             jobs_started += 1

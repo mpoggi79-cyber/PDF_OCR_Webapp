@@ -14,6 +14,7 @@ batch_registry: dict[str, list[dict]] = {}
 JOB_STATE_FILENAME = "job_state.json"
 BATCH_DIRNAME = "_batches"
 TERMINAL_JOB_STATUSES = {"done", "error", "partial"}
+ERROR_METADATA_PREFIX = "<!-- OCR_ERROR "
 
 
 def _utc_now_iso() -> str:
@@ -244,7 +245,8 @@ def _read_ocr_file_status(ocr_path) -> str:
     except Exception:
         return "done"
 
-    if content.lstrip().startswith("> **Errore OCR"):
+    normalized = content.lstrip()
+    if normalized.startswith(ERROR_METADATA_PREFIX) or normalized.startswith("> **Errore OCR"):
         return "error"
     return "done"
 

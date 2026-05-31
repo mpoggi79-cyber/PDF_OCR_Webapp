@@ -3,17 +3,49 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
+import re
+from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 import httpx
 from fastapi import BackgroundTasks, HTTPException
 
-from backend.config import MODEL_NAME, OCR_BLOCK_SIZE, OCR_PROMPT, OCR_TIMEOUT, OLLAMA_URL
-from backend.documents import get_page_image_path, get_page_ocr_path, read_document_metadata
+from backend.config import (
+    DEFAULT_OCR_PROMPT_PROFILE,
+    GLMOCR_LAYOUT_DEVICE,
+    GLMOCR_MODE,
+    GLMOCR_OCR_API_MODE,
+    GLMOCR_OCR_API_URL,
+    GLMOCR_SAVE_LAYOUT_VISUALIZATION,
+    MODEL_NAME,
+    MODEL_FALLBACK_NAMES,
+    OCR_BLOCK_SIZE,
+    OCR_ENABLE_LAYOUT_VISUALIZATION,
+    OCR_ENABLE_STRUCTURED_OUTPUT,
+    OCR_INCLUDE_RAW_PROVIDER_PAYLOAD,
+    OCR_PROVIDER,
+    OCR_RETURN_CROP_IMAGES,
+    OCR_RETRY_BACKOFF_BASE_SECONDS,
+    OCR_RETRY_MAX_ATTEMPTS,
+    OCR_TIMEOUT,
+    OLLAMA_URL,
+    get_prompt_profile_mapping,
+)
+from backend.documents import (
+    get_page_image_path,
+    get_page_ocr_path,
+    get_page_ocr_sidecar_path,
+    read_document_metadata,
+    update_document_prompt_profile,
+)
 from backend.state import TERMINAL_JOB_STATUSES, ocr_jobs, ocr_status, save_job_state
 
 _ocr_lock: asyncio.Lock | None = None
 ERROR_METADATA_PREFIX = "<!-- OCR_ERROR "
+logger = logging.getLogger(__name__)
+_CROPPED_IMAGE_LINE_RE = re.compile(r"^!\[[^\]]*\]\(imgs/cropped_[^)]+\)\s*$")
 
 
 def _get_ocr_lock() -> asyncio.Lock:
@@ -72,6 +104,19 @@ def _classify_error_detail(detail: str) -> dict:
             retryable=True,
         )
 
+    if "429" in lowered or "too many requests" in lowered:
+        return _build_error_info(
+            source="ollama",
+            error_type="rate_limited",
+            label="Servizio OCR temporaneamente sovraccarico",
+            interpretation=(
+                "Ollama ha rifiutato temporaneamente la richiesta per sovraccarico o rate limiting. "
+                "Il documento non e' necessariamente problematico e una nuova prova puo' riuscire."
+            ),
+            detail=detail,
+            retryable=True,
+        )
+
     if (
         "connection refused" in lowered
         or "connecterror" in lowered
@@ -80,7 +125,7 @@ def _classify_error_detail(detail: str) -> dict:
     ):
         return _build_error_info(
             source="ollama",
-            error_type="service_unreachable",
+            error_type="ollama_unreachable",
             label="Servizio Ollama non raggiungibile",
             interpretation=(
                 "Il backend non riesce a collegarsi all'istanza Ollama locale. "
@@ -102,17 +147,55 @@ def _classify_error_detail(detail: str) -> dict:
             retryable=False,
         )
 
-    if "500 internal server error" in lowered or '"error":' in lowered:
+    if (
+        "502" in lowered
+        or "503" in lowered
+        or "504" in lowered
+        or "bad gateway" in lowered
+        or "service unavailable" in lowered
+        or "gateway timeout" in lowered
+    ):
+        return _build_error_info(
+            source="ollama",
+            error_type="service_unavailable",
+            label="Servizio OCR temporaneamente non disponibile",
+            interpretation=(
+                "Ollama ha risposto con un errore temporaneo lato servizio o gateway. "
+                "Il problema sembra transitorio e una nuova prova puo' riuscire."
+            ),
+            detail=detail,
+            retryable=True,
+        )
+
+    if "500 internal server error" in lowered:
         return _build_error_info(
             source="ollama",
             error_type="model_runtime_error",
             label="Errore interno di Ollama o del modello",
             interpretation=(
-                "Ollama ha accettato la richiesta ma il modello ha fallito durante l'esecuzione. "
-                "Questo indica una difficoltà del runtime o del modello sull'input corrente."
+                "Ollama ha accettato la richiesta ma il runtime del modello ha restituito un errore interno. "
+                "Se l'errore non contiene un crash esplicito del modello, una nuova prova puo' riuscire."
             ),
             detail=detail,
-            retryable=False,
+            retryable=True,
+        )
+
+    if (
+        "malformed ocr response" in lowered
+        or "invalid json" in lowered
+        or "expecting value" in lowered
+        or "response field" in lowered
+    ):
+        return _build_error_info(
+            source="ollama",
+            error_type="api_error",
+            label="Risposta OCR malformata",
+            interpretation=(
+                "Il backend ha raggiunto Ollama ma la risposta JSON non e' risultata nel formato atteso. "
+                "Questo segnala un problema transitorio di protocollo o di compatibilita' del servizio."
+            ),
+            detail=detail,
+            retryable=True,
         )
 
     if "no such file" in lowered or "cannot identify image file" in lowered:
@@ -176,8 +259,349 @@ def _classify_ocr_exception(exc: Exception) -> dict:
     return _classify_error_detail(detail)
 
 
+def _is_retryable_error(error_info: dict) -> bool:
+    return bool(error_info.get("retryable"))
+
+
+def _build_retry_delay(attempt: int) -> float:
+    return OCR_RETRY_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+
+
+def _get_candidate_models() -> list[str]:
+    models: list[str] = []
+    for model_name in (MODEL_NAME, *MODEL_FALLBACK_NAMES):
+        if model_name and model_name not in models:
+            models.append(model_name)
+    return models
+
+
+def _get_candidate_providers() -> list[str]:
+    providers: list[str] = []
+    for provider_name in (OCR_PROVIDER, "ollama_http"):
+        normalized = (provider_name or "").strip().lower()
+        if normalized and normalized not in providers:
+            providers.append(normalized)
+    return providers
+
+
 def _format_detail_for_markdown(detail: str) -> str:
     return " ".join(detail.strip().split()).replace("`", "'")
+
+
+def _extract_structured_regions(raw_regions: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_regions, list):
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    for page_index, page_regions in enumerate(raw_regions):
+        if not isinstance(page_regions, list):
+            continue
+        for region_index, region in enumerate(page_regions):
+            if not isinstance(region, dict):
+                continue
+            label = str(region.get("label") or region.get("type") or "text")
+            normalized.append(
+                {
+                    "page": int(region.get("page", page_index)),
+                    "index": int(region.get("index", region_index)),
+                    "label": label,
+                    "bbox": region.get("bbox") or region.get("bbox_2d"),
+                    "content": region.get("content"),
+                }
+            )
+    return normalized
+
+
+def _filter_regions_by_labels(regions: list[dict[str, Any]], labels: set[str]) -> list[dict[str, Any]]:
+    return [region for region in regions if str(region.get("label", "")).lower() in labels]
+
+
+def _prune_none_values(payload: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in payload.items() if value is not None}
+
+
+def _encode_image_like(value: Any) -> str | None:
+    save = getattr(value, "save", None)
+    if not callable(save):
+        return None
+
+    try:
+        buffer = BytesIO()
+        save(buffer, format="PNG")
+    except Exception:
+        return None
+
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def _make_json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+
+    if isinstance(value, Path):
+        return str(value)
+
+    if isinstance(value, bytes):
+        return base64.b64encode(value).decode("ascii")
+
+    image_data = _encode_image_like(value)
+    if image_data is not None:
+        return image_data
+
+    if isinstance(value, dict):
+        return {
+            str(key): _make_json_safe(item)
+            for key, item in value.items()
+            if item is not None
+        }
+
+    if isinstance(value, (list, tuple, set)):
+        return [_make_json_safe(item) for item in value]
+
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist):
+        try:
+            return _make_json_safe(tolist())
+        except Exception:
+            pass
+
+    return str(value)
+
+
+def _post_process_markdown(markdown: str) -> str:
+    lines = markdown.splitlines()
+    cleaned_lines: list[str] = []
+    previous_blank = False
+
+    for line in lines:
+        if _CROPPED_IMAGE_LINE_RE.match(line.strip()):
+            continue
+
+        is_blank = not line.strip()
+        if is_blank and previous_blank:
+            continue
+
+        cleaned_lines.append(line.rstrip())
+        previous_blank = is_blank
+
+    return "\n".join(cleaned_lines).strip()
+
+
+def _has_meaningful_structured_payload(payload: dict[str, Any] | None) -> bool:
+    if not payload:
+        return False
+
+    for key, value in payload.items():
+        if key in {"provider", "model", "raw_provider_payload"}:
+            continue
+        if value not in (None, [], {}, ""):
+            return True
+    return False
+
+
+def _build_structured_payload(
+    *,
+    provider: str,
+    model_name: str,
+    layout_visualization: Any = None,
+    crop_regions: Any = None,
+    structured_regions: list[dict[str, Any]] | None = None,
+    confidence: Any = None,
+    structure_metadata: dict[str, Any] | None = None,
+    raw_provider_payload: Any = None,
+) -> dict[str, Any] | None:
+    if not OCR_ENABLE_STRUCTURED_OUTPUT:
+        return None
+
+    regions = structured_regions or []
+    payload = _make_json_safe(
+        _prune_none_values(
+        {
+            "provider": provider,
+            "model": model_name,
+            "layout_visualization": layout_visualization,
+            "crop_regions": crop_regions,
+            "table_regions": _filter_regions_by_labels(regions, {"table"}) or None,
+            "formula_regions": _filter_regions_by_labels(
+                regions,
+                {"formula", "display_formula", "inline_formula"},
+            )
+            or None,
+            "confidence": confidence,
+            "structure_metadata": structure_metadata,
+            "raw_provider_payload": raw_provider_payload if OCR_INCLUDE_RAW_PROVIDER_PAYLOAD else None,
+        }
+    )
+    )
+    if not isinstance(payload, dict):
+        return None
+    return payload if _has_meaningful_structured_payload(payload) else None
+
+
+def _read_structured_sidecar(doc_id: str, page_num: int) -> dict[str, Any] | None:
+    sidecar_path = get_page_ocr_sidecar_path(doc_id, page_num)
+    if not sidecar_path.exists():
+        return None
+
+    try:
+        payload = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    return payload if isinstance(payload, dict) else None
+
+
+def _write_structured_sidecar(doc_id: str, page_num: int, payload: dict[str, Any] | None) -> None:
+    sidecar_path = get_page_ocr_sidecar_path(doc_id, page_num)
+    if not _has_meaningful_structured_payload(payload):
+        if sidecar_path.exists():
+            sidecar_path.unlink()
+        return
+
+    sidecar_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _normalize_ollama_response(result: dict[str, Any], model_name: str) -> tuple[str, dict[str, Any] | None]:
+    markdown = result.get("response") or result.get("md_results")
+    if not isinstance(markdown, str):
+        raise ValueError("Malformed OCR response: missing string response field")
+
+    raw_regions = result.get("layout_details")
+    if raw_regions is None:
+        raw_regions = result.get("regions")
+
+    structured_regions = _extract_structured_regions(raw_regions)
+    structure_metadata = {
+        "regions": structured_regions,
+        "page_count": len(raw_regions) if isinstance(raw_regions, list) else None,
+        "data_info": result.get("data_info"),
+        "usage": result.get("usage"),
+    }
+    structure_metadata = _prune_none_values(structure_metadata)
+
+    structured_payload = _build_structured_payload(
+        provider="ollama_http",
+        model_name=model_name,
+        layout_visualization=result.get("layout_visualization"),
+        crop_regions=result.get("crop_regions"),
+        structured_regions=structured_regions,
+        confidence=result.get("confidence"),
+        structure_metadata=structure_metadata or None,
+        raw_provider_payload=result,
+    )
+    return markdown, structured_payload
+
+
+def _normalize_glmocr_result(result: Any, model_name: str) -> tuple[str, dict[str, Any] | None]:
+    markdown = getattr(result, "markdown_result", None)
+    if not isinstance(markdown, str):
+        raise ValueError("Malformed glmocr result: missing markdown_result")
+
+    json_result = getattr(result, "json_result", None)
+    structured_regions = _extract_structured_regions(json_result)
+    layout_visualization = getattr(result, "layout_visualization", None)
+    if layout_visualization is None:
+        layout_visualization = getattr(result, "_layout_visualization", None)
+
+    raw_provider_payload = None
+    to_dict = getattr(result, "to_dict", None)
+    if callable(to_dict):
+        maybe_payload = to_dict()
+        if isinstance(maybe_payload, dict):
+            raw_provider_payload = maybe_payload
+
+    structure_metadata = {
+        "regions": structured_regions,
+        "page_count": len(json_result) if isinstance(json_result, list) else None,
+        "image_files": getattr(result, "image_files", None),
+    }
+    structure_metadata = _prune_none_values(structure_metadata)
+
+    structured_payload = _build_structured_payload(
+        provider="glmocr",
+        model_name=model_name,
+        layout_visualization=layout_visualization,
+        crop_regions=getattr(result, "image_files", None),
+        structured_regions=structured_regions,
+        confidence=None,
+        structure_metadata=structure_metadata or None,
+        raw_provider_payload=raw_provider_payload,
+    )
+    return markdown, structured_payload
+
+
+def _build_glmocr_kwargs(model_name: str, prompt_mapping: dict[str, str]) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "mode": GLMOCR_MODE,
+        "model": model_name,
+        "timeout": int(OCR_TIMEOUT),
+        "_dotted": {
+            "pipeline.ocr_api.api_url": GLMOCR_OCR_API_URL,
+            "pipeline.ocr_api.api_mode": GLMOCR_OCR_API_MODE,
+            "pipeline.ocr_api.model": model_name,
+            "pipeline.page_loader.task_prompt_mapping": prompt_mapping,
+        },
+    }
+    if GLMOCR_LAYOUT_DEVICE:
+        kwargs["layout_device"] = GLMOCR_LAYOUT_DEVICE
+    return kwargs
+
+
+def _run_glmocr_sync(
+    img_path: Path,
+    model_name: str,
+    prompt_mapping: dict[str, str],
+) -> tuple[str, dict[str, Any] | None]:
+    from glmocr import GlmOcr
+
+    parse_kwargs: dict[str, Any] = {
+        "save_layout_visualization": GLMOCR_SAVE_LAYOUT_VISUALIZATION,
+    }
+    if OCR_ENABLE_LAYOUT_VISUALIZATION:
+        parse_kwargs["need_layout_visualization"] = True
+    if OCR_RETURN_CROP_IMAGES:
+        parse_kwargs["return_crop_images"] = True
+
+    with GlmOcr(**_build_glmocr_kwargs(model_name, prompt_mapping)) as parser:
+        result = parser.parse(img_path, **parse_kwargs)
+    return _normalize_glmocr_result(result, model_name)
+
+
+async def _run_ocr_with_glmocr(
+    img_path: Path,
+    model_name: str,
+    prompt_mapping: dict[str, str],
+) -> tuple[str, dict[str, Any] | None]:
+    return await asyncio.to_thread(_run_glmocr_sync, img_path, model_name, prompt_mapping)
+
+
+async def _run_ocr_with_ollama_http(
+    img_b64: str,
+    model_name: str,
+    prompt_mapping: dict[str, str],
+) -> tuple[str, dict[str, Any] | None]:
+    payload: dict[str, Any] = {
+        "model": model_name,
+        "prompt": prompt_mapping.get("text") or get_prompt_profile_mapping(DEFAULT_OCR_PROMPT_PROFILE)["text"],
+        "images": [img_b64],
+        "stream": False,
+    }
+    if OCR_ENABLE_LAYOUT_VISUALIZATION:
+        payload["need_layout_visualization"] = True
+    if OCR_RETURN_CROP_IMAGES:
+        payload["return_crop_images"] = True
+
+    async with httpx.AsyncClient(timeout=OCR_TIMEOUT) as client:
+        response = await client.post(OLLAMA_URL, json=payload)
+        response.raise_for_status()
+        result = response.json()
+    if not isinstance(result, dict):
+        raise ValueError("Malformed OCR response: expected JSON object")
+    return _normalize_ollama_response(result, model_name)
 
 
 def _build_error_markdown(page_num: int, error_info: dict) -> str:
@@ -341,9 +765,8 @@ def _is_error_markdown(ocr_path: Path) -> bool:
     if not ocr_path.exists():
         return False
     try:
-        return ocr_path.read_text(encoding="utf-8", errors="ignore").lstrip().startswith(
-            "> **Errore OCR"
-        )
+        content = ocr_path.read_text(encoding="utf-8", errors="ignore").lstrip()
+        return content.startswith(ERROR_METADATA_PREFIX) or content.startswith("> **Errore OCR")
     except Exception:
         return False
 
@@ -391,8 +814,12 @@ def queue_document_ocr(
     doc_id: str,
     *,
     batch_id: str | None = None,
+    prompt_profile: str | None = None,
 ) -> dict:
-    metadata = read_document_metadata(doc_id)
+    if prompt_profile is not None:
+        metadata = update_document_prompt_profile(doc_id, prompt_profile)
+    else:
+        metadata = read_document_metadata(doc_id)
     page_count = metadata["page_count"]
     job = get_document_job_payload(doc_id)
     effective_batch_id = batch_id or job.get("batch_id") or metadata.get("batch_id")
@@ -426,22 +853,29 @@ def queue_document_ocr(
 def get_ocr_payload(doc_id: str, page_num: int) -> dict:
     ocr_path = get_page_ocr_path(doc_id, page_num)
     status = (ocr_status.get(doc_id) or {}).get(page_num, "pending")
+    structured_payload = _read_structured_sidecar(doc_id, page_num)
 
     if status == "processing":
         return {"status": "processing", "markdown": None, "error": None}
     if status == "error":
         markdown = ocr_path.read_text(encoding="utf-8") if ocr_path.exists() else None
-        return {
+        payload = {
             "status": "error",
             "markdown": markdown,
             "error": _extract_error_info_from_markdown(markdown),
         }
+        if structured_payload:
+            payload.update(structured_payload)
+        return payload
     if ocr_path.exists():
-        return {
+        payload = {
             "status": "done",
             "markdown": ocr_path.read_text(encoding="utf-8"),
             "error": None,
         }
+        if structured_payload:
+            payload.update(structured_payload)
+        return payload
 
     return {"status": status, "markdown": None, "error": None}
 
@@ -450,10 +884,15 @@ def start_ocr_payload(
     background_tasks: BackgroundTasks,
     doc_id: str,
     page_num: int,
+    *,
+    prompt_profile: str | None = None,
 ) -> dict:
     img_path = get_page_image_path(doc_id, page_num)
     if not img_path.exists():
         raise HTTPException(status_code=404, detail="Pagina non trovata.")
+
+    if prompt_profile is not None:
+        update_document_prompt_profile(doc_id, prompt_profile)
 
     status = (ocr_status.get(doc_id) or {}).get(page_num, "pending")
     if status == "processing":
@@ -461,10 +900,7 @@ def start_ocr_payload(
 
     ocr_path = get_page_ocr_path(doc_id, page_num)
     if ocr_path.exists() and status != "error":
-        return {
-            "status": "done",
-            "markdown": ocr_path.read_text(encoding="utf-8"),
-        }
+        return get_ocr_payload(doc_id, page_num)
 
     ocr_status.setdefault(doc_id, {})[page_num] = "processing"
     background_tasks.add_task(run_page_ocr_task, doc_id, page_num)
@@ -636,24 +1072,107 @@ async def run_ocr(
     ocr_path: Path,
 ) -> None:
     try:
+        metadata = read_document_metadata(doc_id)
+        prompt_profile = metadata.get("prompt_profile") or DEFAULT_OCR_PROMPT_PROFILE
+        prompt_mapping = get_prompt_profile_mapping(prompt_profile)
         img_b64 = base64.b64encode(img_path.read_bytes()).decode("utf-8")
-        payload = {
-            "model": MODEL_NAME,
-            "prompt": OCR_PROMPT,
-            "images": [img_b64],
-            "stream": False,
-        }
-        async with httpx.AsyncClient(timeout=OCR_TIMEOUT) as client:
-            response = await client.post(OLLAMA_URL, json=payload)
-            response.raise_for_status()
-            result = response.json()
+        last_error: Exception | None = None
+        provider_result: tuple[str, dict[str, Any] | None] | None = None
+        providers = _get_candidate_providers()
+        models = _get_candidate_models()
 
-        markdown = result.get("response", "")
-        ocr_path.write_text(markdown, encoding="utf-8")
-        ocr_status[doc_id][page_num] = "done"
+        for provider_index, provider_name in enumerate(providers, start=1):
+            provider_failed = False
+            for model_index, model_name in enumerate(models, start=1):
+                for attempt in range(1, OCR_RETRY_MAX_ATTEMPTS + 1):
+                    try:
+                        if provider_name == "glmocr":
+                            provider_result = await _run_ocr_with_glmocr(img_path, model_name, prompt_mapping)
+                        else:
+                            provider_result = await _run_ocr_with_ollama_http(img_b64, model_name, prompt_mapping)
+
+                        markdown, structured_payload = provider_result
+                        markdown = _post_process_markdown(markdown)
+                        if model_index > 1 or provider_index > 1:
+                            logger.info(
+                                "OCR succeeded for doc=%s page=%s using fallback provider=%s model=%s",
+                                doc_id,
+                                page_num,
+                                provider_name,
+                                model_name,
+                            )
+                        ocr_path.write_text(markdown, encoding="utf-8")
+                        _write_structured_sidecar(doc_id, page_num, structured_payload)
+                        ocr_status[doc_id][page_num] = "done"
+                        return
+                    except Exception as exc:
+                        last_error = exc
+                        error_info = _classify_ocr_exception(exc)
+                        retryable = _is_retryable_error(error_info)
+                        is_last_attempt = attempt >= OCR_RETRY_MAX_ATTEMPTS
+                        has_fallback_model = model_index < len(models)
+                        has_fallback_provider = provider_index < len(providers)
+
+                        logger.warning(
+                            "OCR attempt failed for doc=%s page=%s provider=%s model=%s attempt=%s/%s type=%s retryable=%s detail=%s",
+                            doc_id,
+                            page_num,
+                            provider_name,
+                            model_name,
+                            attempt,
+                            OCR_RETRY_MAX_ATTEMPTS,
+                            error_info.get("type", "unexpected_error"),
+                            retryable,
+                            error_info.get("detail", ""),
+                        )
+
+                        if provider_name == "glmocr" and not retryable and has_fallback_provider:
+                            provider_failed = True
+                            logger.info(
+                                "Falling back to next OCR provider for doc=%s page=%s after provider=%s failed with type=%s",
+                                doc_id,
+                                page_num,
+                                provider_name,
+                                error_info.get("type", "unexpected_error"),
+                            )
+                            break
+
+                        if error_info.get("type") == "model_not_found" and has_fallback_model:
+                            logger.info(
+                                "Falling back to next OCR model for doc=%s page=%s provider=%s after missing model=%s",
+                                doc_id,
+                                page_num,
+                                provider_name,
+                                model_name,
+                            )
+                            break
+
+                        if not retryable or is_last_attempt:
+                            raise
+
+                        delay = _build_retry_delay(attempt)
+                        logger.info(
+                            "Retrying OCR for doc=%s page=%s model=%s in %.2fs after attempt %s",
+                            doc_id,
+                            page_num,
+                            model_name,
+                            delay,
+                            attempt,
+                        )
+                        await asyncio.sleep(delay)
+
+                if provider_failed:
+                    break
+
+            if provider_failed:
+                continue
+
+        if provider_result is None:
+            raise RuntimeError("OCR response missing after retry loop") from last_error
     except Exception as exc:
         ocr_status[doc_id][page_num] = "error"
         try:
+            _write_structured_sidecar(doc_id, page_num, None)
             error_info = _classify_ocr_exception(exc)
             ocr_path.write_text(_build_error_markdown(page_num, error_info), encoding="utf-8")
         except Exception:

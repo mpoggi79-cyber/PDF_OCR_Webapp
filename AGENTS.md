@@ -2,15 +2,25 @@
 
 ## Panoramica
 
-Web app locale che converte PDF e immagini raster in Markdown tramite **`glm-ocr:latest`** eseguito su **Ollama locale**. Supporta persistenza e ripresa dei job OCR e batch dopo riavvio del server, oltre a diagnostica strutturata degli errori OCR.
+Web app locale che converte PDF e immagini raster in Markdown tramite **`glm-ocr:latest`** eseguito su **Ollama locale**. Supporta persistenza e ripresa dei job OCR e batch dopo riavvio del server, oltre a diagnostica strutturata degli errori OCR. La priorita' di prodotto non e' solo far terminare il job, ma ottenere la conversione piu' fedele possibile sfruttando tutte le funzionalita' disponibili del modello OCR.
 
 - **Backend**: FastAPI con entrypoint leggero in `app.py` e logica suddivisa nei moduli `backend/`
 - **Frontend**: Vanilla JS/HTML/CSS in `static/` — nessun framework, nessun bundler
 - **Input supportati**: PDF, PNG, JPG, JPEG
-- **OCR**: Ollama locale su `http://localhost:11434` con modello `glm-ocr:latest`
+- **OCR**: Ollama locale su `http://localhost:11434` con modello primario `glm-ocr:latest` e fallback `glm-ocr:v0.1.5`
 - **Storage**: file system in `uploads/<uuid>/` — nessun database; stato job e batch persistiti localmente
 - **Persistenza**: job OCR ripresi dopo crash; batch ricostituito da disco
 - **Diagnostica OCR**: gli errori pagina vengono classificati e resi leggibili sia via API sia nel pannello frontend
+
+## Priorita' Correnti
+
+- **Qualita' di conversione prima di tutto**: quando si interviene sul backend OCR o sul frontend dei risultati, privilegiare la fedelta' del contenuto estratto; tabelle, formule, heading, liste, immagini e layout devono essere preservati il piu' possibile. Evitare scorciatoie che semplificano l'output a scapito della struttura del documento.
+
+- **Usare tutte le feature OCR disponibili del modello quando migliorano il risultato**: prioritizzare integrazione di layout visualization, crop regions, metadata strutturali, formule, tabelle, handwriting e confidence se esposte dal modello o dall'SDK. Se una feature richiede campi opzionali o nuove chiavi API, aggiungerle in modo compatibile senza rompere il flusso esistente.
+
+- **Mantenere robustezza e resume come vincoli di base**: retry, error classification, persistenza job e resume post-crash restano obbligatori, ma sono un requisito di affidabilita', non il fine ultimo del prodotto.
+
+- **Integrare l'SDK `glmocr` solo quando porta un vantaggio OCR concreto**: se l'SDK consente accesso a funzionalita' migliori rispetto alla chiamata HTTP diretta, valutarne l'adozione. Se non porta un miglioramento tangibile di qualita' o struttura dell'output, evitare complessita' inutile.
 
 ## Avvio
 
@@ -25,7 +35,7 @@ oppure manualmente:
 uvicorn app:app --reload
 ```
 
-Ollama deve essere già in esecuzione con `ollama serve` e il modello deve essere disponibile con `ollama pull glm-ocr:latest`.
+Ollama deve essere gia' in esecuzione con `ollama serve` e il modello deve essere disponibile con `ollama pull glm-ocr:latest`. Il backend puo' fare fallback a `glm-ocr:v0.1.5` se il tag principale non e' disponibile.
 
 ## Struttura chiave
 
@@ -48,6 +58,7 @@ uploads/<doc_id>/
   job_state.json              ← stato persistente del job OCR {status, done_pages, error_pages, ...}
   pages/page_N.<ext>          ← pagina renderizzata o immagine originale
   ocr/page_N.md               ← risultato OCR per pagina o markdown di errore con metadata diagnostici
+  ocr/page_N.json             ← sidecar opzionale con metadata OCR strutturati di successo
 uploads/_batches/
   <batch_id>.json             ← indice batch persistente {docs, created_at, status}
 ```
@@ -58,29 +69,56 @@ uploads/_batches/
 - **Backend modulare**: mantenere la struttura esistente in `backend/`; non ricondensare tutto in `app.py` senza richiesta esplicita.
 - **Frontend senza build**: `static/app.js` è ES6 puro caricato direttamente dal browser. Non introdurre npm, bundler o transpiler.
 - **Supporto immagini**: un upload immagine genera un documento a pagina singola con `source_type = image`.
-- **Storage file-based e persistente**: usare `uploads/<doc_id>/` e `uploads/_batches/` come fonte di verità; i markdown pagina per pagina rimangono il contenuto OCR immutabile; niente database locale aggiuntivo.
+- **Storage file-based e persistente**: usare `uploads/<doc_id>/` e `uploads/_batches/` come fonte di verità; i markdown pagina per pagina rimangono il contenuto OCR immutabile; i sidecar JSON OCR sono metadata opzionali, non sostituiscono l'export canonico; niente database locale aggiuntivo.
 - **Stato OCR persistente**: `ocr_status` viene ricostruito da disco a ogni riavvio leggendo i markdown; `ocr_jobs` viene ricostruito/ripreso da `job_state.json`; `batch_registry` viene ripristinato dai file batch in `uploads/_batches/`. Qualsiasi pagina rimasta in processing durante un crash viene normalizzata a pending e il job a interrupted.
 - **Semantica resume post-crash**: un job documento non terminato dopo riavvio viene esposto con flag `interrupted=true` e `resumable=true` se ci sono pagine pending; una nuova richiesta POST avvia la ripresa solo dai pending; un batch ricostruito da disco mantiene lo stesso batch_id e riavvia solo i documenti incompleti.
-- **Campi aggiuntivi API**: i payload job documentale, job pagina e batch includono campi opzionali `interrupted`, `resumable` e `updated_at` per compatibilità con il resume; il payload pagina OCR può includere anche `error` con diagnostica strutturata (`source`, `type`, `label`, `interpretation`, `detail`, `retryable`).
-- **Diagnostica errori OCR**: `backend/ocr.py` distingue almeno timeout, servizio Ollama non raggiungibile, modello non trovato, errore interno runtime del modello, assert GGML e errori locali di I/O/backend; il frontend mostra queste informazioni nel pannello OCR senza rompere il flusso esistente.
+- **Campi aggiuntivi API**: i payload job documentale, job pagina e batch includono campi opzionali `interrupted`, `resumable` e `updated_at` per compatibilità con il resume; il payload pagina OCR può includere anche `error` con diagnostica strutturata (`source`, `type`, `label`, `interpretation`, `detail`, `retryable`) e campi OCR strutturati opzionali come `layout_visualization`, `crop_regions`, `table_regions`, `formula_regions`, `confidence` e `structure_metadata`.
+- **Diagnostica errori OCR**: `backend/ocr.py` distingue timeout, `ollama_unreachable`, `model_not_found`, `model_runtime_assert`, `service_unavailable`, `api_error` e errori locali di I/O/backend; il frontend mostra queste informazioni nel pannello OCR senza rompere il flusso esistente.
 - **CORS wildcard**: configurato per sviluppo locale, non restringerlo senza richiesta.
 - **OCR asincrono**: l'OCR parte via `BackgroundTasks`; il client fa polling con `GET /api/ocr/{doc_id}/{page_num}`; il progresso job è tracciato via `GET /api/ocr-job/{doc_id}`.
 - **Batch solo PDF**: la modalità batch accetta file PDF multipli; il supporto immagini è al momento per upload singolo. Lo stato batch persiste su disco per sopravvivere a restart.
+
+## Profili Prompt OCR
+
+Il backend supporta profili prompt selezionabili per adattare l'OCR al tipo di documento senza rompere gli endpoint esistenti.
+
+- **Profili attuali**:
+  - `structured_document`: profilo consigliato per documenti bancari, moduli, fatture, ricevute e PDF con tabelle o campi; e' anche il default operativo usato dal frontend quando il client non passa `prompt_profile`.
+  - `default`: comportamento OCR generico, adatto a documenti normali, scansioni e PDF non fortemente web-centrici.
+  - `web_article`: profilo piu' aggressivo per PDF stampati da pagine web, con istruzioni per ignorare menu, ads, widget, footer e boilerplate del sito.
+- **Selezione backward-compatible**: il client puo' passare `prompt_profile` come query parameter opzionale sugli endpoint di upload e avvio OCR.
+- **Persistenza del profilo**: il profilo scelto viene salvato nei metadata documento e riusato per retry, resume e nuove esecuzioni salvo override esplicito.
+- **Compatibilita'**: ogni estensione futura dei prompt deve preservare l'API attuale e mantenere un comportamento predefinito stabile e documentato quando il parametro non e' fornito.
+
+## Direzione Tecnica OCR
+
+- **Output target**: Markdown strutturato e semanticamente ricco, non semplice testo lineare.
+- **Elementi da preservare**: heading, paragrafi, elenchi, tabelle, formule, immagini, didascalie e blocchi speciali.
+- **Feature da integrare appena possibile**:
+  - `need_layout_visualization`
+  - `return_crop_images`
+  - output formule in LaTeX
+  - output tabelle in HTML o Markdown strutturato
+  - region metadata e bounding boxes
+  - confidence score o segnali di qualita' equivalenti
+- **Regola di priorita'**: se una modifica aumenta la qualita' del parsing del documento senza compromettere compatibilita' e persistenza, va considerata prioritaria rispetto a rifiniture secondarie UI.
 
 ## API Endpoints
 
 | Metodo | Path | Descrizione |
 | ------ | ---- | ----------- |
 | GET | `/` | Serve la SPA principale |
-| GET | `/api/health` | Stato Ollama + disponibilità glm-ocr |
-| POST | `/api/upload` | Carica PDF o immagine → restituisce metadata documento |
+| GET | `/api/health` | Stato Ollama + disponibilita' modello OCR primario/fallback |
+| POST | `/api/upload` | Carica PDF o immagine → restituisce metadata documento; supporta `prompt_profile` opzionale |
 | GET | `/api/documents/{doc_id}` | Metadati documento + stato OCR per pagina |
 | GET | `/api/page/{doc_id}/{page_num}` | Restituisce l'immagine della pagina o l'immagine originale |
 | GET | `/api/ocr/{doc_id}/{page_num}` | Legge il risultato OCR di una pagina; in caso di errore restituisce anche diagnostica strutturata |
-| POST | `/api/ocr/{doc_id}/{page_num}` | Avvia OCR su una pagina |
+| POST | `/api/ocr/{doc_id}/{page_num}` | Avvia OCR su una pagina; supporta `prompt_profile` opzionale |
+| GET | `/api/ocr-job/{doc_id}` | Stato complessivo OCR del documento |
+| POST | `/api/ocr-job/{doc_id}` | Avvia o riprende OCR dell'intero documento; supporta `prompt_profile` opzionale |
 | GET | `/api/export/{doc_id}` | Export Markdown unificato del documento |
-| POST | `/api/batch` | Carica più PDF → `{batch_id, docs, errors}` |
-| POST | `/api/batch/{batch_id}/start` | Avvia OCR su tutto il batch; riprende documenti incompleti se post-restart |
+| POST | `/api/batch` | Carica più PDF → `{batch_id, docs, errors}`; supporta `prompt_profile` opzionale |
+| POST | `/api/batch/{batch_id}/start` | Avvia OCR su tutto il batch; riprende documenti incompleti se post-restart; supporta `prompt_profile` opzionale |
 | GET | `/api/batch/{batch_id}` | Stato avanzamento batch; ricostituito da disco se non in memoria |
 | GET | `/api/batch/{batch_id}/report` | Report Markdown del batch |
 | GET | `/api/batch/{batch_id}/export` | ZIP con tutti i Markdown del batch; rilegge da disco se post-restart |
@@ -89,7 +127,8 @@ uploads/_batches/
 
 - **PyMuPDF (`fitz`)**: rendering PDF → immagine pagina, matrice 2× circa 144 DPI.
 - **httpx**: client HTTP asincrono verso Ollama.
-- **Ollama**: deve girare localmente; `glm-ocr` è multimodale e accetta immagini in base64.
+- **Ollama**: deve girare localmente; `glm-ocr` e' multimodale e accetta immagini in base64.
+- **GLM-OCR SDK (`glmocr`)**: provider OCR primario in modalita' self-hosted; mantenere il fallback HTTP diretto a Ollama per compatibilita' e resilienza.
 
 ## Persistenza e Resume Post-Crash
 
@@ -111,3 +150,10 @@ La webapp, a partire da fine maggio 2026, espone una diagnostica OCR più esplic
 - **Interpretazione errori modello**: errori come `GGML_ASSERT(...) failed` vengono classificati come `model_runtime_assert`, cioè crash del runtime del modello locale, non come errore generico del backend.
 - **UI diagnostica**: `static/app.js` conserva `ocrErrors` per pagina e mostra una scheda diagnostica nel pannello OCR quando una pagina fallisce; il toggle raw permette comunque di leggere il markdown tecnico completo.
 - **Compatibilità**: il frontend continua a funzionare anche senza usare il nuovo oggetto `error`; la diagnostica aggiuntiva è un’estensione compatibile dei payload esistenti.
+
+## Linea Guida per Futuri Interventi
+
+- Se il task riguarda OCR, chiedersi prima: "questa modifica migliora la fedelta' del documento convertito?"
+- Se la risposta e' si, dare priorita' a struttura, formula, tabella, layout e quality metadata.
+- Se la risposta e' no, trattare l'intervento come secondario rispetto alla roadmap OCR.
+- Qualsiasi nuova feature OCR va progettata preservando persistenza, export e resume post-crash.

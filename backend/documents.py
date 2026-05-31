@@ -14,6 +14,8 @@ from backend.config import (
     PDF_EXTENSIONS,
     RASTER_IMAGE_EXTENSIONS,
     UPLOAD_DIR,
+    get_available_prompt_profiles,
+    normalize_prompt_profile,
 )
 from backend.state import ocr_status
 
@@ -56,6 +58,10 @@ def get_page_ocr_path(doc_id: str, page_num: int) -> Path:
     return get_doc_dir(doc_id) / "ocr" / f"page_{page_num}.md"
 
 
+def get_page_ocr_sidecar_path(doc_id: str, page_num: int) -> Path:
+    return get_doc_dir(doc_id) / "ocr" / f"page_{page_num}.json"
+
+
 def _get_extension(filename: str | None) -> str:
     return Path(filename or "").suffix.lower()
 
@@ -74,12 +80,24 @@ async def save_uploaded_document(
     file: UploadFile,
     *,
     batch_id: str | None = None,
+    prompt_profile: str | None = None,
 ) -> dict:
+    normalized_prompt_profile = normalize_prompt_profile(prompt_profile)
     extension = ensure_supported_upload(file.filename)
     if extension in PDF_EXTENSIONS:
-        return await _save_uploaded_pdf(file, extension=extension, batch_id=batch_id)
+        return await _save_uploaded_pdf(
+            file,
+            extension=extension,
+            batch_id=batch_id,
+            prompt_profile=normalized_prompt_profile,
+        )
     if extension in RASTER_IMAGE_EXTENSIONS:
-        return await _save_uploaded_image(file, extension=extension, batch_id=batch_id)
+        return await _save_uploaded_image(
+            file,
+            extension=extension,
+            batch_id=batch_id,
+            prompt_profile=normalized_prompt_profile,
+        )
 
     raise HTTPException(status_code=400, detail="Formato non supportato.")
 
@@ -89,6 +107,7 @@ async def _save_uploaded_pdf(
     *,
     extension: str,
     batch_id: str | None = None,
+    prompt_profile: str,
 ) -> dict:
     doc_id = str(uuid.uuid4())
     doc_dir = get_doc_dir(doc_id)
@@ -123,6 +142,7 @@ async def _save_uploaded_pdf(
         "source_type": "pdf",
         "original_extension": extension,
         "page_image_extension": DEFAULT_PAGE_IMAGE_EXTENSION,
+        "prompt_profile": prompt_profile,
     }
     if batch_id is not None:
         metadata["batch_id"] = batch_id
@@ -141,6 +161,7 @@ async def _save_uploaded_image(
     *,
     extension: str,
     batch_id: str | None = None,
+    prompt_profile: str,
 ) -> dict:
     doc_id = str(uuid.uuid4())
     doc_dir = get_doc_dir(doc_id)
@@ -159,6 +180,7 @@ async def _save_uploaded_image(
         "source_type": "image",
         "original_extension": extension,
         "page_image_extension": extension,
+        "prompt_profile": prompt_profile,
     }
     if batch_id is not None:
         metadata["batch_id"] = batch_id
@@ -176,12 +198,25 @@ def read_document_metadata(doc_id: str) -> dict:
     meta_path = get_metadata_path(doc_id)
     if not meta_path.exists():
         raise HTTPException(status_code=404, detail="Documento non trovato.")
-    return json.loads(meta_path.read_text(encoding="utf-8"))
+    metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    metadata["prompt_profile"] = normalize_prompt_profile(metadata.get("prompt_profile"))
+    return metadata
+
+
+def update_document_prompt_profile(doc_id: str, prompt_profile: str | None) -> dict:
+    metadata = read_document_metadata(doc_id)
+    metadata["prompt_profile"] = normalize_prompt_profile(prompt_profile)
+    get_metadata_path(doc_id).write_text(
+        json.dumps(metadata, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return metadata
 
 
 def get_document_payload(doc_id: str) -> dict:
     metadata = read_document_metadata(doc_id)
     metadata["ocr_status"] = {str(k): v for k, v in ocr_status.get(doc_id, {}).items()}
+    metadata["available_prompt_profiles"] = get_available_prompt_profiles()
     return metadata
 
 
