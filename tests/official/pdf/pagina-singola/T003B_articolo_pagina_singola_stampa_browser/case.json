@@ -1,0 +1,9 @@
+{
+  "id": "T003B",
+  "group": "T003",
+  "label": "Articolo singolo da stampa browser",
+  "status": "ready-for-input",
+  "source_type": "pdf",
+  "prompt_profile": "web_article",
+  "notes": "Inserire un PDF pagina singola derivato da stampa articolo web in input/."
+}

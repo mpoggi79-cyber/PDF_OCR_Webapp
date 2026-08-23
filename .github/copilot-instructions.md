@@ -1,5 +1,6 @@
 # Copilot Instructions
-
+- Tieni sempre conto del fatto che non sono esperto e ho bisogno di spiegazioni semplici e con qualche esempio concreto.
+- Commenta sempre il codice e in testa ai file descrivi la funzionalita del file.
 - Leggi prima [AGENTS.md](../AGENTS.md) quando il task tocca OCR, persistenza, batch o frontend dei risultati.
 - Mantieni [app.py](../app.py) leggero e concentra la logica nei moduli in [backend](../backend/).
 - Mantieni il frontend in [static](../static/) come JavaScript vanilla senza bundler, framework o build step.
@@ -8,3 +9,6 @@
 - Non sostituire il markdown pagina per pagina come fonte canonica di export; i sidecar JSON OCR sono metadata opzionali.
 - Preserva recovery e resume post-crash: pagine 0-indexed, stato file-based in uploads, ricostruzione da disco e semantica interrupted/resumable devono restare coerenti.
 - Quando modifichi il flusso OCR, verifica sia il ramo glmocr sia il fallback HTTP a Ollama.
+- Quando modifichi i prompt GLM-OCR, considera come riferimento i task ufficiali `Text Recognition:`, `Table Recognition:` e `Formula Recognition:` per il ramo SDK; conserva i profili locali per la pagina completa e per il fallback HTTP, salvo evidenza di regressioni.
+- Considera `capabilities` nei sidecar come evidenza delle feature realmente restituite dal provider: non documentare layout visualization, crop o confidence come disponibili solo perche' sono configurati.
+- Per le decisioni su pipeline, KIE e fine-tuning, consulta i riferimenti ufficiali elencati nel documento `nuovo piano.md` e mantieni separati Markdown canonico, metadata opzionali e dataset revisionato.

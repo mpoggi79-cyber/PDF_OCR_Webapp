@@ -1,0 +1,9 @@
+{
+  "id": "T005A",
+  "group": "T005",
+  "label": "Bolletta luce multipagina strutturata",
+  "status": "ready-for-input",
+  "source_type": "pdf",
+  "prompt_profile": "structured_document",
+  "notes": "Inserire un PDF multipagina strutturato di bolletta luce in input/."
+}

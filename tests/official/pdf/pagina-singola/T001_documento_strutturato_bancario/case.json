@@ -1,0 +1,9 @@
+{
+  "id": "T001",
+  "group": "T001",
+  "label": "Documento strutturato bancario",
+  "status": "ready-for-input",
+  "source_type": "pdf",
+  "prompt_profile": "structured_document",
+  "notes": "Inserire un PDF strutturato in input/. Il markdown atteso in expected/ è opzionale in questa fase."
+}

@@ -1,0 +1,10 @@
+{
+  "id": "T002A",
+  "group": "T002",
+  "label": "PDF fotografico diritto",
+  "status": "generated",
+  "source_type": "pdf",
+  "prompt_profile": "structured_document_no_html",
+  "page_rotation": 0,
+  "notes": "Caso di riferimento per la stessa fattura verificata in T002 con rotazione di 90 gradi; PDF fotografico verticale con rotazione nativa del documento; il runner mantiene l'orientamento nativo per la rasterizzazione e usa il profilo no-HTML."
+}

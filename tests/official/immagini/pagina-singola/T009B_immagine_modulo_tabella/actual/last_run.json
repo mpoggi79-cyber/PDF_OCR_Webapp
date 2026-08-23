@@ -1,0 +1,27 @@
+{
+  "case_id": "T009B",
+  "group": "T009",
+  "label": "Immagine modulo con tabella",
+  "prompt_profile": "structured_document",
+  "source_type": "image",
+  "status": "generated",
+  "detail": "Markdown generato con successo.",
+  "doc_id": "79b7543c-329a-45e2-95da-151e57ad8c03",
+  "input_file": "T009B_prinscreen_tabella da web.png",
+  "expected_file": null,
+  "expected_present": false,
+  "actual_file": "D:\\SVILUPPO MATTEO\\Progetto PDF_OCR_Webapp\\tests\\official\\immagini\\pagina-singola\\T009B_immagine_modulo_tabella\\actual\\T009B_prinscreen_tabella da web.md",
+  "job_status": "done",
+  "runner_elapsed_seconds": 19.136,
+  "ocr_total_duration_seconds": 18.991,
+  "pages_duration_seconds": {
+    "0": 18.991
+  },
+  "started_at": "2026-06-05T18:11:18.109366+00:00",
+  "finished_at": "2026-06-05T18:11:37.100824+00:00",
+  "updated_at": "2026-06-05T18:11:18.104794+00:00",
+  "generated_at": "2026-06-05T18:11:37.244271+00:00",
+  "expected_comparison": "not_available",
+  "comparison_warning": null,
+  "comparison_checked_at": "2026-08-22T23:35:07.811489+00:00"
+}

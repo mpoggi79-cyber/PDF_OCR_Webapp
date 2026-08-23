@@ -1,0 +1,9 @@
+{
+  "id": "T005B",
+  "group": "T005",
+  "label": "Bolletta gas multipagina strutturata",
+  "status": "ready-for-input",
+  "source_type": "pdf",
+  "prompt_profile": "structured_document",
+  "notes": "Inserire un PDF multipagina strutturato di bolletta gas in input/."
+}

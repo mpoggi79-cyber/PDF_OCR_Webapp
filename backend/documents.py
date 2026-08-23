@@ -66,6 +66,13 @@ def _get_extension(filename: str | None) -> str:
     return Path(filename or "").suffix.lower()
 
 
+def _normalize_page_rotation(page_rotation: int | None) -> int:
+    normalized = 0 if page_rotation is None else page_rotation
+    if normalized not in {0, 90, 180, 270}:
+        raise HTTPException(status_code=400, detail="La rotazione pagina deve essere 0, 90, 180 o 270 gradi.")
+    return normalized
+
+
 def ensure_supported_upload(filename: str | None) -> str:
     extension = _get_extension(filename)
     if extension not in CURRENTLY_SUPPORTED_EXTENSIONS:
@@ -81,8 +88,10 @@ async def save_uploaded_document(
     *,
     batch_id: str | None = None,
     prompt_profile: str | None = None,
+    page_rotation: int | None = None,
 ) -> dict:
     normalized_prompt_profile = normalize_prompt_profile(prompt_profile)
+    normalized_page_rotation = _normalize_page_rotation(page_rotation)
     extension = ensure_supported_upload(file.filename)
     if extension in PDF_EXTENSIONS:
         return await _save_uploaded_pdf(
@@ -90,6 +99,7 @@ async def save_uploaded_document(
             extension=extension,
             batch_id=batch_id,
             prompt_profile=normalized_prompt_profile,
+            page_rotation=normalized_page_rotation,
         )
     if extension in RASTER_IMAGE_EXTENSIONS:
         return await _save_uploaded_image(
@@ -108,6 +118,7 @@ async def _save_uploaded_pdf(
     extension: str,
     batch_id: str | None = None,
     prompt_profile: str,
+    page_rotation: int,
 ) -> dict:
     doc_id = str(uuid.uuid4())
     doc_dir = get_doc_dir(doc_id)
@@ -127,7 +138,10 @@ async def _save_uploaded_pdf(
 
         for page_num in range(page_count):
             page = pdf_doc[page_num]
-            pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
+            matrix = fitz.Matrix(2.0, 2.0)
+            if page_rotation:
+                matrix = matrix.prerotate(page_rotation)
+            pix = page.get_pixmap(matrix=matrix)
             pix.save(str(build_page_image_path(doc_id, page_num)))
 
         pdf_doc.close()
@@ -143,6 +157,7 @@ async def _save_uploaded_pdf(
         "original_extension": extension,
         "page_image_extension": DEFAULT_PAGE_IMAGE_EXTENSION,
         "prompt_profile": prompt_profile,
+        "page_rotation": page_rotation,
     }
     if batch_id is not None:
         metadata["batch_id"] = batch_id

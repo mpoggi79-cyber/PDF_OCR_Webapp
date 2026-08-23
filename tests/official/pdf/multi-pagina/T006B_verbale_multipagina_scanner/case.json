@@ -1,0 +1,9 @@
+{
+  "id": "T006B",
+  "group": "T006",
+  "label": "Verbale multipagina scannerizzato",
+  "status": "ready-for-input",
+  "source_type": "pdf",
+  "prompt_profile": "default",
+  "notes": "Inserire un PDF multipagina scannerizzato di verbale in input/."
+}

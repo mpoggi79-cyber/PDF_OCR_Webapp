@@ -1,0 +1,9 @@
+{
+  "id": "T005C",
+  "group": "T005",
+  "label": "Bolletta acqua multipagina strutturata",
+  "status": "ready-for-input",
+  "source_type": "pdf",
+  "prompt_profile": "structured_document",
+  "notes": "Inserire un PDF multipagina strutturato di bolletta acqua in input/."
+}

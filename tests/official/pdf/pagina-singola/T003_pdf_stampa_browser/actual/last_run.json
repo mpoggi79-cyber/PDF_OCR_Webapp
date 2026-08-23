@@ -1,0 +1,27 @@
+{
+  "case_id": "T003",
+  "group": "T003",
+  "label": "PDF da stampa browser",
+  "prompt_profile": "web_article",
+  "source_type": "pdf",
+  "status": "generated",
+  "detail": "Markdown generato con successo.",
+  "doc_id": "5c691047-d4be-4d16-9d02-44a6a9e9f559",
+  "input_file": "T003_glm-ocr.pdf",
+  "expected_file": null,
+  "expected_present": false,
+  "actual_file": "D:\\SVILUPPO MATTEO\\Progetto PDF_OCR_Webapp\\tests\\official\\pdf\\pagina-singola\\T003_pdf_stampa_browser\\actual\\T003_glm-ocr.md",
+  "job_status": "done",
+  "runner_elapsed_seconds": 19.189,
+  "ocr_total_duration_seconds": 18.343,
+  "pages_duration_seconds": {
+    "0": 18.343
+  },
+  "started_at": "2026-06-05T17:54:12.156288+00:00",
+  "finished_at": "2026-06-05T17:54:30.499931+00:00",
+  "updated_at": "2026-06-05T17:54:12.151492+00:00",
+  "generated_at": "2026-06-05T17:54:31.343970+00:00",
+  "expected_comparison": "not_available",
+  "comparison_warning": null,
+  "comparison_checked_at": "2026-08-22T23:35:07.805586+00:00"
+}

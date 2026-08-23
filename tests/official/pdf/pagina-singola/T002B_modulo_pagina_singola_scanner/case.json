@@ -1,0 +1,9 @@
+{
+  "id": "T002B",
+  "group": "T002",
+  "label": "Modulo singolo scannerizzato",
+  "status": "ready-for-input",
+  "source_type": "pdf",
+  "prompt_profile": "default",
+  "notes": "Inserire un PDF scannerizzato di modulo singolo in input/."
+}

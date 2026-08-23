@@ -23,6 +23,11 @@ GLMOCR_LAYOUT_DEVICE = "cpu"
 GLMOCR_OCR_API_URL = OLLAMA_URL
 GLMOCR_OCR_API_MODE = "ollama_generate"
 GLMOCR_SAVE_LAYOUT_VISUALIZATION = False
+GLMOCR_OFFICIAL_TASK_PROMPTS = {
+    "text": "Text Recognition:",
+    "table": "Table Recognition:",
+    "formula": "Formula Recognition:",
+}
 
 DEFAULT_OCR_PROMPT_PROFILE = "structured_document"
 
@@ -52,6 +57,21 @@ OCR_PROMPT_PROFILES = {
             "Extract only the real table or structured field/value block from this region. "
             "Output a clean HTML or Markdown table, preferring HTML when it preserves merged headers, section titles, or form-like rows more faithfully. "
             "Use thead/tbody when appropriate, keep exact row order and cell values, and do not insert empty spacer rows unless they are real data rows."
+        ),
+        "formula": "Extract only the formula from this region and output it cleanly, preferably in LaTeX when possible.",
+    },
+    "structured_document_no_html": {
+        "text": (
+            "Extract all text and document structure from this image and output the result in clean Markdown only. "
+            "Never output HTML tags. For every table or structured field/value block, use a pipe-delimited Markdown table. "
+            "Preserve the exact field/value structure, row order, headings, dates, amounts, codes, and visible grouping. "
+            "Preserve empty fields as empty cells when they are part of the real document structure. "
+            "Do not invent spacer rows, filler text, or commentary. Output only the document content."
+        ),
+        "table": (
+            "Extract only the real table or structured field/value block from this region. "
+            "Output a clean pipe-delimited Markdown table only; never use HTML tags. "
+            "Keep exact row order and cell values, and do not insert empty spacer rows unless they are real data rows."
         ),
         "formula": "Extract only the formula from this region and output it cleanly, preferably in LaTeX when possible.",
     },
@@ -93,6 +113,10 @@ def normalize_prompt_profile(prompt_profile: str | None) -> str:
 
 def get_prompt_profile_mapping(prompt_profile: str | None) -> dict[str, str]:
     return dict(OCR_PROMPT_PROFILES[normalize_prompt_profile(prompt_profile)])
+
+
+def get_glmocr_task_prompt_mapping() -> dict[str, str]:
+    return dict(GLMOCR_OFFICIAL_TASK_PROMPTS)
 
 PDF_EXTENSIONS = {".pdf"}
 RASTER_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}

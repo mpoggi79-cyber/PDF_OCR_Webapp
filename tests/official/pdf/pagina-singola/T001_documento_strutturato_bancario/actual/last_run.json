@@ -1,0 +1,27 @@
+{
+  "case_id": "T001",
+  "group": "T001",
+  "label": "Documento strutturato bancario",
+  "prompt_profile": "structured_document",
+  "source_type": "pdf",
+  "status": "generated",
+  "detail": "Markdown generato con successo.",
+  "doc_id": "f932fb45-c91a-4de5-846c-8ac54b58a302",
+  "input_file": "T001_BONIFICO_EURO_INSTANT_20241111105222395.pdf",
+  "expected_file": "T001_BONIFICO_EURO_INSTANT_20241111105222395.md",
+  "expected_present": true,
+  "expected_comparison": "match",
+  "comparison_warning": null,
+  "actual_file": "D:\\SVILUPPO MATTEO\\Progetto PDF_OCR_Webapp\\tests\\official\\pdf\\pagina-singola\\T001_documento_strutturato_bancario\\actual\\T001_BONIFICO_EURO_INSTANT_20241111105222395.md",
+  "job_status": "done",
+  "runner_elapsed_seconds": 43.704,
+  "ocr_total_duration_seconds": 42.909,
+  "pages_duration_seconds": {
+    "0": 42.909
+  },
+  "started_at": "2026-08-22T21:12:25.744326+00:00",
+  "finished_at": "2026-08-22T21:13:08.654310+00:00",
+  "updated_at": "2026-08-22T21:12:25.735637+00:00",
+  "generated_at": "2026-08-22T21:13:09.477285+00:00",
+  "comparison_checked_at": "2026-08-22T23:35:07.802566+00:00"
+}

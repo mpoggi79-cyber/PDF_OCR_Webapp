@@ -1,0 +1,27 @@
+{
+  "case_id": "T006B",
+  "group": "T006",
+  "label": "Verbale multipagina scannerizzato",
+  "prompt_profile": "default",
+  "source_type": "pdf",
+  "status": "generated",
+  "detail": "Markdown generato con successo.",
+  "doc_id": "4b770362-337c-4bec-a1d9-4723dbd73873",
+  "input_file": "T006B_Assunzione firmata.pdf",
+  "expected_file": null,
+  "expected_present": false,
+  "actual_file": "D:\\SVILUPPO MATTEO\\Progetto PDF_OCR_Webapp\\tests\\official\\pdf\\multi-pagina\\T006B_verbale_multipagina_scanner\\actual\\T006B_Assunzione firmata.md",
+  "job_status": "done",
+  "runner_elapsed_seconds": 26.176,
+  "ocr_total_duration_seconds": 25.912,
+  "pages_duration_seconds": {
+    "0": 25.912
+  },
+  "started_at": "2026-06-05T18:04:49.856340+00:00",
+  "finished_at": "2026-06-05T18:05:15.768638+00:00",
+  "updated_at": "2026-06-05T18:04:49.851599+00:00",
+  "generated_at": "2026-06-05T18:05:16.031189+00:00",
+  "expected_comparison": "not_available",
+  "comparison_warning": null,
+  "comparison_checked_at": "2026-08-22T23:35:07.809594+00:00"
+}

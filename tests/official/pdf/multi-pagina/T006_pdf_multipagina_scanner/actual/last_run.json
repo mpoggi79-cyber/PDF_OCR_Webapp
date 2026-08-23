@@ -1,0 +1,30 @@
+{
+  "case_id": "T006",
+  "group": "T006",
+  "label": "PDF multipagina scannerizzato",
+  "prompt_profile": "default",
+  "source_type": "pdf",
+  "status": "generated",
+  "detail": "Markdown generato con successo.",
+  "doc_id": "f988c98d-8e64-4f50-a97b-757f98a457e6",
+  "input_file": "T006_Questionario Denis Albano caso n. 519315705 del 05-05-2023.pdf",
+  "expected_file": null,
+  "expected_present": false,
+  "actual_file": "D:\\SVILUPPO MATTEO\\Progetto PDF_OCR_Webapp\\tests\\official\\pdf\\multi-pagina\\T006_pdf_multipagina_scanner\\actual\\T006_Questionario Denis Albano caso n. 519315705 del 05-05-2023.md",
+  "job_status": "done",
+  "runner_elapsed_seconds": 89.429,
+  "ocr_total_duration_seconds": 88.878,
+  "pages_duration_seconds": {
+    "0": 15.293,
+    "1": 19.574,
+    "2": 26.111,
+    "3": 27.9
+  },
+  "started_at": "2026-06-05T18:03:20.120470+00:00",
+  "finished_at": "2026-06-05T18:04:49.071595+00:00",
+  "updated_at": "2026-06-05T18:03:20.117876+00:00",
+  "generated_at": "2026-06-05T18:04:49.548834+00:00",
+  "expected_comparison": "not_available",
+  "comparison_warning": null,
+  "comparison_checked_at": "2026-08-22T23:35:07.809085+00:00"
+}

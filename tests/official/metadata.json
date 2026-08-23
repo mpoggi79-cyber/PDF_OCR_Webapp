@@ -1,0 +1,144 @@
+{
+  "format_version": 1,
+  "dataset_name": "official-ocr-tests",
+  "description": "Dataset ufficiale per test automatici del flusso OCR con input, expected e actual separati.",
+  "results_dir": "results",
+  "cases": [
+    {
+      "id": "T001",
+      "group": "T001",
+      "label": "Documento strutturato bancario",
+      "relative_case_dir": "pdf/pagina-singola/T001_documento_strutturato_bancario",
+      "source_type": "pdf",
+      "prompt_profile": "structured_document_no_html"
+    },
+    {
+      "id": "T001B",
+      "group": "T001",
+      "label": "Fattura pagina singola strutturata",
+      "relative_case_dir": "pdf/pagina-singola/T001B_fattura_pagina_singola_strutturata",
+      "source_type": "pdf",
+      "prompt_profile": "structured_document"
+    },
+    {
+      "id": "T002",
+      "group": "T002",
+      "label": "PDF fotografico scannerizzato",
+      "relative_case_dir": "pdf/pagina-singola/T002_pdf_fotografico_scanner",
+      "source_type": "pdf",
+      "prompt_profile": "structured_document"
+    },
+    {
+      "id": "T002A",
+      "group": "T002",
+      "label": "PDF fotografico diritto",
+      "relative_case_dir": "pdf/pagina-singola/T002A_pdf_fotografico_diritto",
+      "source_type": "pdf",
+      "prompt_profile": "structured_document_no_html"
+    },
+    {
+      "id": "T002B",
+      "group": "T002",
+      "label": "Modulo singolo scannerizzato",
+      "relative_case_dir": "pdf/pagina-singola/T002B_modulo_pagina_singola_scanner",
+      "source_type": "pdf",
+      "prompt_profile": "default"
+    },
+    {
+      "id": "T003",
+      "group": "T003",
+      "label": "PDF da stampa browser",
+      "relative_case_dir": "pdf/pagina-singola/T003_pdf_stampa_browser",
+      "source_type": "pdf",
+      "prompt_profile": "web_article"
+    },
+    {
+      "id": "T003B",
+      "group": "T003",
+      "label": "Articolo singolo da stampa browser",
+      "relative_case_dir": "pdf/pagina-singola/T003B_articolo_pagina_singola_stampa_browser",
+      "source_type": "pdf",
+      "prompt_profile": "web_article"
+    },
+    {
+      "id": "T005",
+      "group": "T005",
+      "label": "Documento multipagina strutturato",
+      "relative_case_dir": "pdf/multi-pagina/T005_documento_multipagina_strutturato",
+      "source_type": "pdf",
+      "prompt_profile": "structured_document"
+    },
+    {
+      "id": "T005A",
+      "group": "T005",
+      "label": "Bolletta luce multipagina strutturata",
+      "relative_case_dir": "pdf/multi-pagina/T005A_bolletta_luce_multipagina_strutturata",
+      "source_type": "pdf",
+      "prompt_profile": "structured_document"
+    },
+    {
+      "id": "T005B",
+      "group": "T005",
+      "label": "Bolletta gas multipagina strutturata",
+      "relative_case_dir": "pdf/multi-pagina/T005B_bolletta_gas_multipagina_strutturata",
+      "source_type": "pdf",
+      "prompt_profile": "structured_document"
+    },
+    {
+      "id": "T005C",
+      "group": "T005",
+      "label": "Bolletta acqua multipagina strutturata",
+      "relative_case_dir": "pdf/multi-pagina/T005C_bolletta_acqua_multipagina_strutturata",
+      "source_type": "pdf",
+      "prompt_profile": "structured_document"
+    },
+    {
+      "id": "T006",
+      "group": "T006",
+      "label": "PDF multipagina scannerizzato",
+      "relative_case_dir": "pdf/multi-pagina/T006_pdf_multipagina_scanner",
+      "source_type": "pdf",
+      "prompt_profile": "default"
+    },
+    {
+      "id": "T006B",
+      "group": "T006",
+      "label": "Verbale multipagina scannerizzato",
+      "relative_case_dir": "pdf/multi-pagina/T006B_verbale_multipagina_scanner",
+      "source_type": "pdf",
+      "prompt_profile": "default"
+    },
+    {
+      "id": "T007",
+      "group": "T007",
+      "label": "PDF multipagina da stampa browser",
+      "relative_case_dir": "pdf/multi-pagina/T007_pdf_multipagina_stampa_browser",
+      "source_type": "pdf",
+      "prompt_profile": "web_article"
+    },
+    {
+      "id": "T007B",
+      "group": "T007",
+      "label": "Report web multipagina da stampa browser",
+      "relative_case_dir": "pdf/multi-pagina/T007B_report_web_multipagina_stampa_browser",
+      "source_type": "pdf",
+      "prompt_profile": "web_article"
+    },
+    {
+      "id": "T009",
+      "group": "T009",
+      "label": "Immagine con testi e tabelle",
+      "relative_case_dir": "immagini/pagina-singola/T009_immagine_testi_tabelle",
+      "source_type": "image",
+      "prompt_profile": "structured_document"
+    },
+    {
+      "id": "T009B",
+      "group": "T009",
+      "label": "Immagine modulo con tabella",
+      "relative_case_dir": "immagini/pagina-singola/T009B_immagine_modulo_tabella",
+      "source_type": "image",
+      "prompt_profile": "structured_document"
+    }
+  ]
+}

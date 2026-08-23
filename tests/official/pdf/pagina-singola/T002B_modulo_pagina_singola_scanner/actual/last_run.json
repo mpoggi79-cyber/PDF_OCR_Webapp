@@ -1,0 +1,27 @@
+{
+  "case_id": "T002B",
+  "group": "T002",
+  "label": "Modulo singolo scannerizzato",
+  "prompt_profile": "default",
+  "source_type": "pdf",
+  "status": "generated",
+  "detail": "Markdown generato con successo.",
+  "doc_id": "4c9fe161-ffa9-4a9c-b0bb-534213702652",
+  "input_file": "T002B_2024_10_01 attestato di residenza per fatturazione USA.pdf",
+  "expected_file": null,
+  "expected_present": false,
+  "actual_file": "D:\\SVILUPPO MATTEO\\Progetto PDF_OCR_Webapp\\tests\\official\\pdf\\pagina-singola\\T002B_modulo_pagina_singola_scanner\\actual\\T002B_2024_10_01 attestato di residenza per fatturazione USA.md",
+  "job_status": "done",
+  "runner_elapsed_seconds": 28.155,
+  "ocr_total_duration_seconds": 27.986,
+  "pages_duration_seconds": {
+    "0": 27.986
+  },
+  "started_at": "2026-06-05T17:53:43.859583+00:00",
+  "finished_at": "2026-06-05T17:54:11.845761+00:00",
+  "updated_at": "2026-06-05T17:53:43.856372+00:00",
+  "generated_at": "2026-06-05T17:54:12.014298+00:00",
+  "expected_comparison": "not_available",
+  "comparison_warning": null,
+  "comparison_checked_at": "2026-08-22T23:35:07.805124+00:00"
+}

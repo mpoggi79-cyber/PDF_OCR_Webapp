@@ -1,0 +1,9 @@
+{
+  "id": "T009",
+  "group": "T009",
+  "label": "Immagine con testi e tabelle",
+  "status": "ready-for-input",
+  "source_type": "image",
+  "prompt_profile": "structured_document",
+  "notes": "Inserire una singola immagine PNG, JPG o JPEG in input/."
+}

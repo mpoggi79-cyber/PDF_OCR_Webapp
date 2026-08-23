@@ -74,6 +74,67 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _coerce_duration_ms(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and value >= 0:
+        return int(round(value))
+    return None
+
+
+def _normalize_pages_duration_ms(value: Any) -> dict[str, int] | None:
+    if not isinstance(value, dict):
+        return None
+
+    normalized: dict[str, int] = {}
+    for page_num, duration_ms in value.items():
+        coerced = _coerce_duration_ms(duration_ms)
+        if coerced is not None:
+            normalized[str(page_num)] = coerced
+
+    return normalized or None
+
+
+def _collect_job_timing_from_dir(doc_dir: Path, page_count: int) -> dict[str, Any]:
+    total_duration_ms = 0
+    pages_duration_ms: dict[str, int] = {}
+    started_at: str | None = None
+    finished_at: str | None = None
+    has_duration = False
+
+    for page_num in range(page_count):
+        sidecar = _read_json(doc_dir / "ocr" / f"page_{page_num}.json")
+        if sidecar is None:
+            continue
+
+        duration_ms = _coerce_duration_ms(sidecar.get("duration_ms"))
+        if duration_ms is not None:
+            pages_duration_ms[str(page_num)] = duration_ms
+            total_duration_ms += duration_ms
+            has_duration = True
+
+        page_started_at = sidecar.get("started_at")
+        if isinstance(page_started_at, str) and page_started_at:
+            if started_at is None or page_started_at < started_at:
+                started_at = page_started_at
+
+        page_finished_at = sidecar.get("finished_at")
+        if isinstance(page_finished_at, str) and page_finished_at:
+            if finished_at is None or page_finished_at > finished_at:
+                finished_at = page_finished_at
+
+    return {
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "total_duration_ms": total_duration_ms if has_duration else None,
+        "pages_duration_ms": pages_duration_ms or None,
+    }
+
+
+def collect_job_timing_from_sidecars(doc_id: str, page_count: int) -> dict[str, Any]:
+    return _collect_job_timing_from_dir(UPLOAD_DIR / doc_id, page_count)
+
+
 def get_job_state_path(doc_id: str) -> Path:
     return UPLOAD_DIR / doc_id / JOB_STATE_FILENAME
 
@@ -93,6 +154,7 @@ def read_job_state(doc_id: str) -> dict[str, Any] | None:
 
 
 def save_job_state(doc_id: str, job: dict[str, Any]) -> dict[str, Any]:
+    pages_duration_ms = _normalize_pages_duration_ms(job.get("pages_duration_ms"))
     payload = {
         "doc_id": doc_id,
         "batch_id": job.get("batch_id"),
@@ -104,6 +166,10 @@ def save_job_state(doc_id: str, job: dict[str, Any]) -> dict[str, Any]:
         "error_pages": int(job.get("error_pages") or 0),
         "processing_pages": int(job.get("processing_pages") or 0),
         "pending_pages": int(job.get("pending_pages") or 0),
+        "started_at": job.get("started_at"),
+        "finished_at": job.get("finished_at"),
+        "total_duration_ms": _coerce_duration_ms(job.get("total_duration_ms")),
+        "pages_duration_ms": pages_duration_ms,
         "updated_at": job.get("updated_at") or _utc_now_iso(),
         "interrupted": bool(job.get("interrupted")),
         "resumable": bool(job.get("resumable")),
@@ -204,6 +270,7 @@ def _build_recovered_job(
 ) -> dict[str, Any]:
     pages_done, pages_error, pages_processing = _count_page_statuses(page_status, page_count)
     pending_pages = max(page_count - pages_done - pages_error - pages_processing, 0)
+    timing_summary = collect_job_timing_from_sidecars(doc_id, page_count)
 
     persisted_status = (persisted_job or {}).get("status")
     was_interrupted = bool((persisted_job or {}).get("interrupted")) or persisted_status in {
@@ -233,6 +300,7 @@ def _build_recovered_job(
         "updated_at": _utc_now_iso(),
         "interrupted": interrupted,
         "resumable": resumable,
+        **timing_summary,
     }
 
 

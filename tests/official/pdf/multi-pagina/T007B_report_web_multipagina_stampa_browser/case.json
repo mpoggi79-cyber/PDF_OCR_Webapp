@@ -1,0 +1,9 @@
+{
+  "id": "T007B",
+  "group": "T007",
+  "label": "Report web multipagina da stampa browser",
+  "status": "ready-for-input",
+  "source_type": "pdf",
+  "prompt_profile": "web_article",
+  "notes": "Inserire un PDF multipagina derivato da report web stampato in input/."
+}

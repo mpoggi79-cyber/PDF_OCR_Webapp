@@ -1,0 +1,9 @@
+{
+  "id": "T006",
+  "group": "T006",
+  "label": "PDF multipagina scannerizzato",
+  "status": "ready-for-input",
+  "source_type": "pdf",
+  "prompt_profile": "default",
+  "notes": "Inserire un PDF multipagina scannerizzato in input/."
+}

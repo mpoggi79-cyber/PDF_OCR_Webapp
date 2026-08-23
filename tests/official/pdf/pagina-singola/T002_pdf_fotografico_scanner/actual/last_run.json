@@ -1,0 +1,27 @@
+{
+  "case_id": "T002",
+  "group": "T002",
+  "label": "PDF fotografico scannerizzato",
+  "prompt_profile": "structured_document_no_html",
+  "source_type": "pdf",
+  "status": "generated",
+  "detail": "Markdown generato con successo.",
+  "doc_id": "e24b10d6-9d5b-47f9-9a2e-5104eb9e67d1",
+  "input_file": "T002_Fattura 77 SCM Assistenza Pantografi novembre 2025 EU.pdf",
+  "expected_file": "T002_Fattura 77 SCM Assistenza Pantografi novembre 2025 EU.md",
+  "expected_present": true,
+  "expected_comparison": "match",
+  "comparison_warning": null,
+  "actual_file": "D:\\SVILUPPO MATTEO\\Progetto PDF_OCR_Webapp\\tests\\official\\pdf\\pagina-singola\\T002_pdf_fotografico_scanner\\actual\\T002_Fattura 77 SCM Assistenza Pantografi novembre 2025 EU.md",
+  "job_status": "done",
+  "runner_elapsed_seconds": 56.497,
+  "ocr_total_duration_seconds": 56.397,
+  "pages_duration_seconds": {
+    "0": 56.397
+  },
+  "started_at": "2026-08-23T00:07:16.723986+00:00",
+  "finished_at": "2026-08-23T00:08:13.121897+00:00",
+  "updated_at": "2026-08-23T00:07:16.715241+00:00",
+  "generated_at": "2026-08-23T00:08:13.253292+00:00",
+  "comparison_checked_at": "2026-08-23T00:32:34.455954+00:00"
+}

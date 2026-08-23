@@ -1,0 +1,27 @@
+{
+  "case_id": "T001B",
+  "group": "T001",
+  "label": "Fattura pagina singola strutturata",
+  "prompt_profile": "structured_document",
+  "source_type": "pdf",
+  "status": "generated",
+  "detail": "Markdown generato con successo.",
+  "doc_id": "c54074e2-b7dc-4ff8-922f-11fdb82567c0",
+  "input_file": "T001B_Fattura 77 SCM Assistenza Pantografi novembre 2025 EU.pdf",
+  "expected_file": "T001B_Fattura 77 SCM Assistenza Pantografi novembre 2025 EU.md",
+  "expected_present": true,
+  "expected_comparison": "match",
+  "comparison_warning": null,
+  "actual_file": "D:\\SVILUPPO MATTEO\\Progetto PDF_OCR_Webapp\\tests\\official\\pdf\\pagina-singola\\T001B_fattura_pagina_singola_strutturata\\actual\\T001B_Fattura 77 SCM Assistenza Pantografi novembre 2025 EU.md",
+  "job_status": "done",
+  "runner_elapsed_seconds": 29.107,
+  "ocr_total_duration_seconds": 28.88,
+  "pages_duration_seconds": {
+    "0": 28.88
+  },
+  "started_at": "2026-08-22T21:35:50.920032+00:00",
+  "finished_at": "2026-08-22T21:36:19.800366+00:00",
+  "updated_at": "2026-08-22T21:35:50.917878+00:00",
+  "generated_at": "2026-08-22T21:36:20.033164+00:00",
+  "comparison_checked_at": "2026-08-22T23:35:07.803344+00:00"
+}

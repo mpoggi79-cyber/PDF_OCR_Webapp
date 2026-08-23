@@ -1,0 +1,9 @@
+{
+  "id": "T007",
+  "group": "T007",
+  "label": "PDF multipagina da stampa browser",
+  "status": "ready-for-input",
+  "source_type": "pdf",
+  "prompt_profile": "web_article",
+  "notes": "Inserire un PDF multipagina derivato da stampa pagina web in input/."
+}

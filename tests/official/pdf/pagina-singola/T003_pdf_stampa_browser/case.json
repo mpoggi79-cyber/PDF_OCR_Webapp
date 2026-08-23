@@ -1,0 +1,9 @@
+{
+  "id": "T003",
+  "group": "T003",
+  "label": "PDF da stampa browser",
+  "status": "ready-for-input",
+  "source_type": "pdf",
+  "prompt_profile": "web_article",
+  "notes": "Inserire un PDF derivato da stampa pagina web in input/."
+}

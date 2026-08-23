@@ -37,6 +37,33 @@ uvicorn app:app --reload
 
 Ollama deve essere gia' in esecuzione con `ollama serve` e il modello deve essere disponibile con `ollama pull glm-ocr:latest`. Il backend puo' fare fallback a `glm-ocr:v0.1.5` se il tag principale non e' disponibile.
 
+## Test ufficiali OCR
+
+I casi ufficiali sono descritti in [tests/Elenco e descrizione test.md](tests/Elenco%20e%20descrizione%20test.md) e organizzati in `tests/official/`. Il runner usa le API HTTP del backend locale, quindi per un test OCR reale devono essere attivi sia FastAPI sia Ollama.
+
+Comandi principali da eseguire dalla radice del progetto:
+
+```powershell
+.venv\Scripts\python.exe tests\run_official_tests.py --list
+.venv\Scripts\python.exe tests\run_official_tests.py --check-structure
+.venv\Scripts\python.exe tests\run_official_tests.py --case T002 --exact-case
+.venv\Scripts\python.exe tests\run_official_tests.py --case T002 --exact-case --compare-only
+```
+
+- `--exact-case` e' obbligatorio quando l'ID coincide con un gruppo: senza questa opzione `--case T002` esegue T002, T002A e T002B.
+- `--check-structure` controlla `case.json`, `input`, `expected` e `actual` senza contattare il backend.
+- `--compare-only` confronta gli actual gia' presenti con gli expected e aggiorna i report, senza eseguire nuovo OCR.
+- Il confronto e' testuale esatto. Prima di consolidare un expected diverso dall'attuale, eseguire una verifica visiva del risultato e controllare heading, liste, tabelle, formule, immagini e ordine di lettura.
+- Il runner salva i risultati in `actual/last_run.json` e nei report riepilogativi in `tests/official/results/`; non usare i file in `uploads/` come expected del dataset.
+- La data nella tabella dei test rappresenta l'ultima esecuzione OCR; un successivo `--compare-only` aggiorna il confronto ma non cambia quella data.
+
+### Baseline verificata T002
+
+- T002 usa `structured_document_no_html` e `page_rotation = 90`: il PDF scannerizzato viene ruotato durante la rasterizzazione prima dell'OCR.
+- T002A usa lo stesso profilo con `page_rotation = 0` e conserva l'orientamento nativo del PDF.
+- L'actual di T002 ruotato coincide byte-per-byte con l'expected consolidato di T002A; dopo la verifica visiva, anche l'expected di T002 e' stato consolidato e il confronto ufficiale risulta `match`.
+- Con il profilo no-HTML le tabelle devono essere pipe-delimited Markdown e l'output non deve contenere tag HTML; questa proprieta' va verificata nell'actual prima di aggiornare expected.
+
 ## Struttura chiave
 
 ```text
@@ -58,7 +85,7 @@ uploads/<doc_id>/
   job_state.json              ← stato persistente del job OCR {status, done_pages, error_pages, ...}
   pages/page_N.<ext>          ← pagina renderizzata o immagine originale
   ocr/page_N.md               ← risultato OCR per pagina o markdown di errore con metadata diagnostici
-  ocr/page_N.json             ← sidecar opzionale con metadata OCR strutturati di successo
+  ocr/page_N.json             ← sidecar opzionale con metadata OCR strutturati di successo e capability osservate
 uploads/_batches/
   <batch_id>.json             ← indice batch persistente {docs, created_at, status}
 ```
@@ -68,11 +95,11 @@ uploads/_batches/
 - **Pagine 0-indexed**: `page_0.*` e `page_0.md` sia nel backend che nel frontend.
 - **Backend modulare**: mantenere la struttura esistente in `backend/`; non ricondensare tutto in `app.py` senza richiesta esplicita.
 - **Frontend senza build**: `static/app.js` è ES6 puro caricato direttamente dal browser. Non introdurre npm, bundler o transpiler.
-- **Supporto immagini**: un upload immagine genera un documento a pagina singola con `source_type = image`.
+- **Supporto immagini**: un upload immagine genera un documento a pagina singola con `source_type = image`; gli upload PDF possono usare il parametro opzionale `page_rotation` (`0`, `90`, `180` o `270`) per correggere scansioni ruotate prima dell'OCR.
 - **Storage file-based e persistente**: usare `uploads/<doc_id>/` e `uploads/_batches/` come fonte di verità; i markdown pagina per pagina rimangono il contenuto OCR immutabile; i sidecar JSON OCR sono metadata opzionali, non sostituiscono l'export canonico; niente database locale aggiuntivo.
 - **Stato OCR persistente**: `ocr_status` viene ricostruito da disco a ogni riavvio leggendo i markdown; `ocr_jobs` viene ricostruito/ripreso da `job_state.json`; `batch_registry` viene ripristinato dai file batch in `uploads/_batches/`. Qualsiasi pagina rimasta in processing durante un crash viene normalizzata a pending e il job a interrupted.
 - **Semantica resume post-crash**: un job documento non terminato dopo riavvio viene esposto con flag `interrupted=true` e `resumable=true` se ci sono pagine pending; una nuova richiesta POST avvia la ripresa solo dai pending; un batch ricostruito da disco mantiene lo stesso batch_id e riavvia solo i documenti incompleti.
-- **Campi aggiuntivi API**: i payload job documentale, job pagina e batch includono campi opzionali `interrupted`, `resumable` e `updated_at` per compatibilità con il resume; il payload pagina OCR può includere anche `error` con diagnostica strutturata (`source`, `type`, `label`, `interpretation`, `detail`, `retryable`) e campi OCR strutturati opzionali come `layout_visualization`, `crop_regions`, `table_regions`, `formula_regions`, `confidence` e `structure_metadata`.
+- **Campi aggiuntivi API**: i payload job documentale, job pagina e batch includono campi opzionali `interrupted`, `resumable` e `updated_at` per compatibilità con il resume; il payload pagina OCR può includere anche `error` con diagnostica strutturata (`source`, `type`, `label`, `interpretation`, `detail`, `retryable`) e campi OCR strutturati opzionali come `layout_visualization`, `crop_regions`, `table_regions`, `formula_regions`, `confidence`, `capabilities` e `structure_metadata`. `capabilities` descrive le feature realmente restituite dal provider, senza confondere un'opzione configurata con un dato disponibile.
 - **Diagnostica errori OCR**: `backend/ocr.py` distingue timeout, `ollama_unreachable`, `model_not_found`, `model_runtime_assert`, `service_unavailable`, `api_error` e errori locali di I/O/backend; il frontend mostra queste informazioni nel pannello OCR senza rompere il flusso esistente.
 - **CORS wildcard**: configurato per sviluppo locale, non restringerlo senza richiesta.
 - **OCR asincrono**: l'OCR parte via `BackgroundTasks`; il client fa polling con `GET /api/ocr/{doc_id}/{page_num}`; il progresso job è tracciato via `GET /api/ocr-job/{doc_id}`.
@@ -84,10 +111,12 @@ Il backend supporta profili prompt selezionabili per adattare l'OCR al tipo di d
 
 - **Profili attuali**:
   - `structured_document`: profilo consigliato per documenti bancari, moduli, fatture, ricevute e PDF con tabelle o campi; e' anche il default operativo usato dal frontend quando il client non passa `prompt_profile`.
+  - `structured_document_no_html`: variante che forza output Markdown senza tag HTML e converte le tabelle HTML restituite dal provider in tabelle pipe-delimited.
   - `default`: comportamento OCR generico, adatto a documenti normali, scansioni e PDF non fortemente web-centrici.
   - `web_article`: profilo piu' aggressivo per PDF stampati da pagine web, con istruzioni per ignorare menu, ads, widget, footer e boilerplate del sito.
 - **Selezione backward-compatible**: il client puo' passare `prompt_profile` come query parameter opzionale sugli endpoint di upload e avvio OCR.
 - **Persistenza del profilo**: il profilo scelto viene salvato nei metadata documento e riusato per retry, resume e nuove esecuzioni salvo override esplicito.
+- **Prompt canonici SDK**: il provider `glmocr` usa i prompt ufficiali `Text Recognition:`, `Table Recognition:` e `Formula Recognition:` per il riconoscimento specializzato per regioni; i profili locali piu' descrittivi restano disponibili per la pagina completa e per il fallback HTTP a Ollama.
 - **Compatibilita'**: ogni estensione futura dei prompt deve preservare l'API attuale e mantenere un comportamento predefinito stabile e documentato quando il parametro non e' fornito.
 
 ## Direzione Tecnica OCR
@@ -109,7 +138,7 @@ Il backend supporta profili prompt selezionabili per adattare l'OCR al tipo di d
 | ------ | ---- | ----------- |
 | GET | `/` | Serve la SPA principale |
 | GET | `/api/health` | Stato Ollama + disponibilita' modello OCR primario/fallback |
-| POST | `/api/upload` | Carica PDF o immagine → restituisce metadata documento; supporta `prompt_profile` opzionale |
+| POST | `/api/upload` | Carica PDF o immagine → restituisce metadata documento; supporta `prompt_profile` e `page_rotation` opzionali |
 | GET | `/api/documents/{doc_id}` | Metadati documento + stato OCR per pagina |
 | GET | `/api/page/{doc_id}/{page_num}` | Restituisce l'immagine della pagina o l'immagine originale |
 | GET | `/api/ocr/{doc_id}/{page_num}` | Legge il risultato OCR di una pagina; in caso di errore restituisce anche diagnostica strutturata |
@@ -129,6 +158,8 @@ Il backend supporta profili prompt selezionabili per adattare l'OCR al tipo di d
 - **httpx**: client HTTP asincrono verso Ollama.
 - **Ollama**: deve girare localmente; `glm-ocr` e' multimodale e accetta immagini in base64.
 - **GLM-OCR SDK (`glmocr`)**: provider OCR primario in modalita' self-hosted; mantenere il fallback HTTP diretto a Ollama per compatibilita' e resilienza.
+
+La prima verifica reale del percorso SDK e' stata eseguita il 22 agosto 2026 su T001/T001B con `glmocr 0.1.5` e `glm-ocr:latest`: il provider ha restituito regioni testuali e tabelle con bounding box. Nella configurazione locale verificata non sono risultati popolati layout visualization, crop images o confidence; queste feature non devono essere considerate disponibili finche' un test dedicato non le conferma.
 
 ## Persistenza e Resume Post-Crash
 

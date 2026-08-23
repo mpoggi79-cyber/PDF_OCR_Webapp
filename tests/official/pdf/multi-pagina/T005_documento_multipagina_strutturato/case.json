@@ -1,0 +1,8 @@
+{
+  "id": "T005",
+  "label": "Documento multipagina strutturato",
+  "status": "generated",
+  "source_type": "pdf",
+  "prompt_profile": "structured_document",
+  "notes": "OCR completato il 22 agosto 2026: 15/15 pagine completate, 0 errori, pagina 2 vuota mantenuta. Il Markdown generato non include i numeri di pagina presenti nell'intestazione del PDF."
+}

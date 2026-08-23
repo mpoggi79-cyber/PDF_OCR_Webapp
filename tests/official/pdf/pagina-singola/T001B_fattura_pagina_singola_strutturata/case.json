@@ -1,0 +1,9 @@
+{
+  "id": "T001B",
+  "group": "T001",
+  "label": "Fattura pagina singola strutturata",
+  "status": "ready-for-input",
+  "source_type": "pdf",
+  "prompt_profile": "structured_document",
+  "notes": "Inserire un PDF pagina singola strutturato di fattura in input/."
+}

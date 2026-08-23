@@ -83,8 +83,18 @@ async def health() -> JSONResponse:
 
 
 @app.post("/api/upload")
-async def upload_pdf(file: UploadFile = File(...), prompt_profile: str | None = None) -> JSONResponse:
-    return JSONResponse(await save_uploaded_document(file, prompt_profile=prompt_profile))
+async def upload_pdf(
+    file: UploadFile = File(...),
+    prompt_profile: str | None = None,
+    page_rotation: int | None = None,
+) -> JSONResponse:
+    return JSONResponse(
+        await save_uploaded_document(
+            file,
+            prompt_profile=prompt_profile,
+            page_rotation=page_rotation,
+        )
+    )
 
 
 @app.get("/api/documents/{doc_id}")

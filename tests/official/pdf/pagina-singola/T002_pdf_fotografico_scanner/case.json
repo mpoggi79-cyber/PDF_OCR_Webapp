@@ -1,0 +1,10 @@
+{
+  "id": "T002",
+  "group": "T002",
+  "label": "PDF fotografico scannerizzato",
+  "status": "generated",
+  "source_type": "pdf",
+  "prompt_profile": "structured_document_no_html",
+  "page_rotation": 90,
+  "notes": "PDF scannerizzato orizzontale con contenuto ruotato di 90 gradi; il runner usa la rotazione per la rasterizzazione."
+}

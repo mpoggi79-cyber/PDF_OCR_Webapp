@@ -85,6 +85,8 @@ Campi principali:
 - prompt_profiles: profili prompt OCR selezionabili lato API.
 - default_prompt_profile: profilo usato se non viene specificato altro.
 
+Per PDF acquisiti con il contenuto ruotato, l'upload accetta il parametro opzionale `page_rotation` con valore `0`, `90`, `180` o `270`. La rotazione viene applicata alla pagina rasterizzata e salvata nei metadata del documento; il valore predefinito è `0`.
+
 Esempio di risposta:
 
 ```json
@@ -123,6 +125,7 @@ Il backend supporta profili prompt diversi per adattare l'OCR a tipi di input di
 Profili attuali:
 
 - structured_document: profilo consigliato per documenti bancari, moduli, fatture, ricevute e PDF ricchi di tabelle o campi; e' anche il default operativo usato dal frontend quando non viene passato `prompt_profile`.
+- structured_document_no_html: variante per ottenere solo Markdown, con tabelle pipe-delimited e conversione delle tabelle HTML eventualmente restituite dal provider.
 - default: comportamento OCR generico, adatto a documenti normali, scansioni e PDF non fortemente web-centrici.
 - web_article: profilo piu' aggressivo per PDF stampati da pagine web, con istruzioni per ignorare menu, ads, widget, footer e boilerplate del sito.
 
@@ -222,7 +225,7 @@ La UI legge questi campi e mostra una scheda diagnostica senza perdere la possib
 | ------ | ---- | ----------- |
 | GET | / | Serve la SPA principale |
 | GET | /api/health | Stato Ollama, modelli configurati e modello selezionato |
-| POST | /api/upload | Carica PDF o immagine e crea il documento; supporta `prompt_profile` opzionale |
+| POST | /api/upload | Carica PDF o immagine e crea il documento; supporta `prompt_profile` e `page_rotation` opzionali |
 | GET | /api/documents/{doc_id} | Metadata documento e stato pagina per pagina |
 | GET | /api/page/{doc_id}/{page_num} | Restituisce l'immagine della pagina o l'immagine originale |
 | GET | /api/ocr/{doc_id}/{page_num} | Stato pagina OCR, markdown, errore strutturato e campi OCR opzionali |
@@ -273,6 +276,41 @@ Repository attuale:
 - Nessun database.
 - Nessun sistema di migrazioni.
 - Stato applicativo ricostruibile da disco a ogni riavvio.
+
+Test automatici locali:
+
+```powershell
+.venv\Scripts\python.exe -m unittest tests.test_ocr_core tests.test_markdown_cleanup -v
+python tests/run_official_tests.py --check-structure
+```
+
+I test unitari verificano le parti deterministiche del backend OCR, come classificazione degli errori,
+retry/backoff, normalizzazione dei metadata strutturati e pulizia del Markdown. I test ufficiali eseguono
+invece il flusso HTTP reale e richiedono backend e Ollama disponibili.
+
+### Test ufficiali OCR
+
+I casi ufficiali sono descritti in [tests/Elenco e descrizione test.md](tests/Elenco%20e%20descrizione%20test.md) e organizzati in `tests/official/`. Per un test OCR reale devono essere attivi il backend FastAPI e Ollama.
+
+```powershell
+.venv\Scripts\python.exe tests\run_official_tests.py --list
+.venv\Scripts\python.exe tests\run_official_tests.py --check-structure
+.venv\Scripts\python.exe tests\run_official_tests.py --case T002 --exact-case
+.venv\Scripts\python.exe tests\run_official_tests.py --case T002 --exact-case --compare-only
+```
+
+- Usare `--exact-case` quando l'ID coincide con un gruppo: senza questa opzione `--case T002` esegue anche T002A e T002B.
+- Usare `--check-structure` per controllare le cartelle standard senza contattare il backend.
+- Usare `--compare-only` per confrontare actual ed expected e aggiornare i report senza eseguire nuovo OCR.
+- Il confronto e' testuale esatto. Consolidare un nuovo expected solo dopo una verifica visiva di heading, liste, tabelle, formule, immagini e ordine di lettura.
+- Gli actual e gli expected dei casi ufficiali sono distinti dai risultati runtime in `uploads/`; i report sono salvati in `tests/official/results/`.
+
+Baseline verificata il 23 agosto 2026:
+
+- T002 usa `structured_document_no_html` con `page_rotation = 90`.
+- T002A usa lo stesso profilo con `page_rotation = 0` e rappresenta il riferimento in orientamento nativo.
+- L'actual ruotato di T002 coincide byte-per-byte con l'expected di T002A; l'expected di T002 e' stato quindi consolidato e il confronto risulta `match`.
+- In modalità no-HTML le tabelle sono pipe-delimited Markdown e l'output non contiene tag HTML.
 
 Supporto workspace VS Code gia' incluso:
 

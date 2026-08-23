@@ -5,6 +5,9 @@ import base64
 import json
 import logging
 import re
+import time
+from datetime import datetime, timezone
+from html.parser import HTMLParser
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -31,6 +34,7 @@ from backend.config import (
     OCR_RETRY_MAX_ATTEMPTS,
     OCR_TIMEOUT,
     OLLAMA_URL,
+    get_glmocr_task_prompt_mapping,
     get_prompt_profile_mapping,
 )
 from backend.documents import (
@@ -41,11 +45,17 @@ from backend.documents import (
     update_document_prompt_profile,
 )
 from backend.state import TERMINAL_JOB_STATUSES, ocr_jobs, ocr_status, save_job_state
+from backend.state import collect_job_timing_from_sidecars
 
 _ocr_lock: asyncio.Lock | None = None
 ERROR_METADATA_PREFIX = "<!-- OCR_ERROR "
 logger = logging.getLogger(__name__)
 _CROPPED_IMAGE_LINE_RE = re.compile(r"^!\[[^\]]*\]\(imgs/cropped_[^)]+\)\s*$")
+_LABELED_FENCE_LINE_RE = re.compile(r"^\s*```(?P<language>[A-Za-z0-9_+-]+)\s*$")
+_CONTAMINATED_HEADING_FENCE_RE = re.compile(r"^(?P<prefix>\s{0,3}#{1,6}\s*)```(?P<language>[A-Za-z0-9_+-]+)\s*$")
+_BARE_FENCE_LINE_RE = re.compile(r"^\s*```\s*$")
+_INLINE_HTML_TAG_RE = re.compile(r"</?[A-Za-z][\w:-]*(?:\s+[^>]*)?>")
+_SIMPLE_TEXT_FENCE_LANGUAGES = {"html", "markdown", "md", "text", "plaintext"}
 
 
 def _get_ocr_lock() -> asyncio.Lock:
@@ -320,6 +330,24 @@ def _prune_none_values(payload: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if value is not None}
 
 
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _merge_sidecar_timing(
+    payload: dict[str, Any] | None,
+    *,
+    started_at: str,
+    finished_at: str,
+    duration_ms: int,
+) -> dict[str, Any]:
+    merged = dict(payload or {})
+    merged["started_at"] = started_at
+    merged["finished_at"] = finished_at
+    merged["duration_ms"] = duration_ms
+    return _prune_none_values(merged)
+
+
 def _encode_image_like(value: Any) -> str | None:
     save = getattr(value, "save", None)
     if not callable(save):
@@ -369,8 +397,146 @@ def _make_json_safe(value: Any) -> Any:
     return str(value)
 
 
-def _post_process_markdown(markdown: str) -> str:
-    lines = markdown.splitlines()
+class _HtmlTableParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.rows: list[list[str]] = []
+        self._current_row: list[str] | None = None
+        self._current_cell: list[str] | None = None
+        self._current_cell_span = 1
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        normalized_tag = tag.lower()
+        if normalized_tag == "tr":
+            self._current_row = []
+        elif normalized_tag in {"td", "th"} and self._current_row is not None:
+            self._current_cell = []
+            attributes = dict(attrs)
+            try:
+                self._current_cell_span = max(int(attributes.get("colspan") or "1"), 1)
+            except ValueError:
+                self._current_cell_span = 1
+        elif normalized_tag == "br" and self._current_cell is not None:
+            self._current_cell.append(" ")
+
+    def handle_data(self, data: str) -> None:
+        if self._current_cell is not None:
+            self._current_cell.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        normalized_tag = tag.lower()
+        if normalized_tag in {"td", "th"} and self._current_cell is not None and self._current_row is not None:
+            value = " ".join("".join(self._current_cell).split())
+            self._current_row.append(value)
+            self._current_row.extend("" for _ in range(self._current_cell_span - 1))
+            self._current_cell = None
+            self._current_cell_span = 1
+        elif normalized_tag == "tr" and self._current_row is not None:
+            self.rows.append(self._current_row)
+            self._current_row = None
+
+
+class _HtmlTableExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.output: list[str] = []
+        self._table_markup: list[str] | None = None
+        self._table_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        raw_tag = self.get_starttag_text() or f"<{tag}>"
+        if self._table_depth:
+            self._table_markup.append(raw_tag)
+            if tag.lower() == "table":
+                self._table_depth += 1
+        elif tag.lower() == "table":
+            self._table_markup = [raw_tag]
+            self._table_depth = 1
+        else:
+            self.output.append(raw_tag)
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        raw_tag = self.get_starttag_text() or f"<{tag}/>"
+        if self._table_depth:
+            self._table_markup.append(raw_tag)
+        else:
+            self.output.append(raw_tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        raw_tag = f"</{tag}>"
+        if not self._table_depth:
+            self.output.append(raw_tag)
+            return
+
+        self._table_markup.append(raw_tag)
+        if tag.lower() != "table":
+            return
+
+        self._table_depth -= 1
+        if self._table_depth:
+            return
+
+        table_markup = "".join(self._table_markup)
+        self.output.append(_render_html_table_as_markdown(table_markup))
+        self._table_markup = None
+
+    def handle_data(self, data: str) -> None:
+        if self._table_depth:
+            self._table_markup.append(data)
+        else:
+            self.output.append(data)
+
+    def handle_entityref(self, name: str) -> None:
+        self._append_raw(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        self._append_raw(f"&#{name};")
+
+    def _append_raw(self, value: str) -> None:
+        if self._table_depth:
+            self._table_markup.append(value)
+        else:
+            self.output.append(value)
+
+
+def _render_html_table_as_markdown(table_markup: str) -> str:
+    parser = _HtmlTableParser()
+    parser.feed(table_markup)
+    parser.close()
+    if not parser.rows:
+        return ""
+
+    column_count = max(len(row) for row in parser.rows)
+    rows = [row + [""] * (column_count - len(row)) for row in parser.rows]
+
+    def format_cell(value: str) -> str:
+        return value.replace("|", "\\|").replace("\n", " ").strip()
+
+    header = rows[0]
+    separator = ["---"] * column_count
+    rendered = [
+        "| " + " | ".join(format_cell(value) for value in header) + " |",
+        "| " + " | ".join(separator) + " |",
+    ]
+    rendered.extend(
+        "| " + " | ".join(format_cell(value) for value in row) + " |"
+        for row in rows[1:]
+    )
+    return "\n".join(rendered)
+
+
+def _convert_html_tables_to_markdown(markdown: str) -> str:
+    parser = _HtmlTableExtractor()
+    parser.feed(markdown)
+    parser.close()
+    return "".join(parser.output)
+
+
+def _post_process_markdown(markdown: str, *, force_no_html: bool = False) -> str:
+    if force_no_html:
+        markdown = _convert_html_tables_to_markdown(markdown)
+
+    lines = _rewrite_spurious_fence_blocks(markdown.splitlines())
     cleaned_lines: list[str] = []
     previous_blank = False
 
@@ -386,6 +552,137 @@ def _post_process_markdown(markdown: str) -> str:
         previous_blank = is_blank
 
     return "\n".join(cleaned_lines).strip()
+
+
+def _rewrite_spurious_fence_blocks(lines: list[str]) -> list[str]:
+    rewritten_lines: list[str] = []
+    index = 0
+
+    while index < len(lines):
+        line = lines[index]
+        contaminated_heading_match = _CONTAMINATED_HEADING_FENCE_RE.match(line)
+        labeled_fence_match = _LABELED_FENCE_LINE_RE.match(line)
+
+        if contaminated_heading_match or labeled_fence_match:
+            opening_match = contaminated_heading_match or labeled_fence_match
+            language = (opening_match.group("language") or "").lower()
+            closing_index = _find_simple_fence_block_end(lines, index + 1)
+
+            if language in _SIMPLE_TEXT_FENCE_LANGUAGES and closing_index is not None:
+                block_lines = lines[index + 1 : closing_index]
+                if _is_simple_text_fence_block(block_lines):
+                    heading_prefix = (
+                        contaminated_heading_match.group("prefix")
+                        if contaminated_heading_match is not None
+                        else None
+                    )
+                    rewritten_lines.extend(
+                        _unwrap_simple_fence_block(block_lines, heading_prefix=heading_prefix)
+                    )
+                    index = closing_index + 1
+                    continue
+
+        if _is_spurious_standalone_fence(lines, index):
+            index += 1
+            continue
+
+        rewritten_lines.append(line)
+        index += 1
+
+    return rewritten_lines
+
+
+def _find_simple_fence_block_end(lines: list[str], start_index: int) -> int | None:
+    for index in range(start_index, len(lines)):
+        if _BARE_FENCE_LINE_RE.match(lines[index]):
+            return index
+    return None
+
+
+def _is_simple_text_fence_block(block_lines: list[str]) -> bool:
+    meaningful_lines = [line.strip() for line in block_lines if line.strip()]
+    if not meaningful_lines:
+        return True
+
+    return all(not _looks_like_literal_code_line(line) for line in meaningful_lines)
+
+
+def _looks_like_literal_code_line(line: str) -> bool:
+    if line.startswith(("$", ">>>", "pip ", "python ", "curl ", "npm ", "git ")):
+        return True
+
+    if _INLINE_HTML_TAG_RE.search(line):
+        return True
+
+    if any(token in line for token in ("</", "/>", "=>", "::", "{", "}", ";")):
+        return True
+
+    if line.startswith(("def ", "class ", "import ", "from ", "SELECT ", "INSERT ", "UPDATE ")):
+        return True
+
+    return False
+
+
+def _unwrap_simple_fence_block(
+    block_lines: list[str],
+    *,
+    heading_prefix: str | None,
+) -> list[str]:
+    trimmed_lines = _trim_blank_edges(block_lines)
+    if not trimmed_lines:
+        return []
+
+    if heading_prefix:
+        meaningful_lines = [line.strip() for line in trimmed_lines if line.strip()]
+        if not meaningful_lines:
+            return []
+
+        unwrapped_lines = [f"{heading_prefix}{meaningful_lines[0]}"]
+        if len(meaningful_lines) > 1:
+            unwrapped_lines.append("")
+            unwrapped_lines.extend(meaningful_lines[1:])
+        return unwrapped_lines
+
+    return [line.rstrip() for line in trimmed_lines]
+
+
+def _trim_blank_edges(lines: list[str]) -> list[str]:
+    start_index = 0
+    end_index = len(lines)
+
+    while start_index < end_index and not lines[start_index].strip():
+        start_index += 1
+
+    while end_index > start_index and not lines[end_index - 1].strip():
+        end_index -= 1
+
+    return lines[start_index:end_index]
+
+
+def _is_spurious_standalone_fence(lines: list[str], index: int) -> bool:
+    line = lines[index]
+    if not _BARE_FENCE_LINE_RE.match(line):
+        return False
+
+    previous_line = lines[index - 1].strip() if index > 0 else ""
+    next_line = lines[index + 1].strip() if index + 1 < len(lines) else ""
+
+    if _looks_like_literal_code_line(previous_line) or _looks_like_literal_code_line(next_line):
+        return False
+
+    if _INLINE_HTML_TAG_RE.search(previous_line) or _INLINE_HTML_TAG_RE.search(next_line):
+        return False
+
+    if not previous_line and not next_line:
+        return True
+
+    if not previous_line:
+        return True
+
+    if not next_line:
+        return True
+
+    return True
 
 
 def _has_meaningful_structured_payload(payload: dict[str, Any] | None) -> bool:
@@ -415,24 +712,33 @@ def _build_structured_payload(
         return None
 
     regions = structured_regions or []
+    table_regions = _filter_regions_by_labels(regions, {"table"})
+    formula_regions = _filter_regions_by_labels(
+        regions,
+        {"formula", "display_formula", "inline_formula"},
+    )
     payload = _make_json_safe(
         _prune_none_values(
-        {
-            "provider": provider,
-            "model": model_name,
-            "layout_visualization": layout_visualization,
-            "crop_regions": crop_regions,
-            "table_regions": _filter_regions_by_labels(regions, {"table"}) or None,
-            "formula_regions": _filter_regions_by_labels(
-                regions,
-                {"formula", "display_formula", "inline_formula"},
+                {
+                    "provider": provider,
+                    "model": model_name,
+                    "layout_visualization": layout_visualization,
+                    "crop_regions": crop_regions,
+                    "table_regions": table_regions or None,
+                    "formula_regions": formula_regions or None,
+                    "confidence": confidence,
+                    "capabilities": {
+                        "layout_visualization": layout_visualization is not None,
+                        "crop_regions": crop_regions not in (None, [], {}),
+                        "structured_regions": bool(regions),
+                        "table_regions": bool(table_regions),
+                        "formula_regions": bool(formula_regions),
+                        "confidence": confidence is not None,
+                    },
+                    "structure_metadata": structure_metadata,
+                    "raw_provider_payload": raw_provider_payload if OCR_INCLUDE_RAW_PROVIDER_PAYLOAD else None,
+                }
             )
-            or None,
-            "confidence": confidence,
-            "structure_metadata": structure_metadata,
-            "raw_provider_payload": raw_provider_payload if OCR_INCLUDE_RAW_PROVIDER_PAYLOAD else None,
-        }
-    )
     )
     if not isinstance(payload, dict):
         return None
@@ -535,6 +841,8 @@ def _normalize_glmocr_result(result: Any, model_name: str) -> tuple[str, dict[st
 
 
 def _build_glmocr_kwargs(model_name: str, prompt_mapping: dict[str, str]) -> dict[str, Any]:
+    task_prompt_mapping = dict(prompt_mapping)
+    task_prompt_mapping.update(get_glmocr_task_prompt_mapping())
     kwargs: dict[str, Any] = {
         "mode": GLMOCR_MODE,
         "model": model_name,
@@ -543,7 +851,7 @@ def _build_glmocr_kwargs(model_name: str, prompt_mapping: dict[str, str]) -> dic
             "pipeline.ocr_api.api_url": GLMOCR_OCR_API_URL,
             "pipeline.ocr_api.api_mode": GLMOCR_OCR_API_MODE,
             "pipeline.ocr_api.model": model_name,
-            "pipeline.page_loader.task_prompt_mapping": prompt_mapping,
+            "pipeline.page_loader.task_prompt_mapping": task_prompt_mapping,
         },
     }
     if GLMOCR_LAYOUT_DEVICE:
@@ -695,6 +1003,7 @@ def _resolve_job_status(
 def _update_job(doc_id: str, page_count: int, **updates) -> dict:
     pages_done, pages_error, pages_processing = _count_pages(doc_id, page_count)
     pending_pages = max(page_count - pages_done - pages_error - pages_processing, 0)
+    timing_summary = collect_job_timing_from_sidecars(doc_id, page_count)
     existing = ocr_jobs.setdefault(
         doc_id,
         {
@@ -741,6 +1050,7 @@ def _update_job(doc_id: str, page_count: int, **updates) -> dict:
             "batch_id": batch_id,
             "interrupted": interrupted,
             "resumable": resumable,
+            **timing_summary,
         }
     )
     for key, value in updates.items():
@@ -1071,6 +1381,8 @@ async def run_ocr(
     img_path: Path,
     ocr_path: Path,
 ) -> None:
+    started_at = _utc_now_iso()
+    started_at_perf = time.perf_counter()
     try:
         metadata = read_document_metadata(doc_id)
         prompt_profile = metadata.get("prompt_profile") or DEFAULT_OCR_PROMPT_PROFILE
@@ -1092,7 +1404,10 @@ async def run_ocr(
                             provider_result = await _run_ocr_with_ollama_http(img_b64, model_name, prompt_mapping)
 
                         markdown, structured_payload = provider_result
-                        markdown = _post_process_markdown(markdown)
+                        markdown = _post_process_markdown(
+                            markdown,
+                            force_no_html=prompt_profile == "structured_document_no_html",
+                        )
                         if model_index > 1 or provider_index > 1:
                             logger.info(
                                 "OCR succeeded for doc=%s page=%s using fallback provider=%s model=%s",
@@ -1102,7 +1417,18 @@ async def run_ocr(
                                 model_name,
                             )
                         ocr_path.write_text(markdown, encoding="utf-8")
-                        _write_structured_sidecar(doc_id, page_num, structured_payload)
+                        finished_at = _utc_now_iso()
+                        duration_ms = max(int((time.perf_counter() - started_at_perf) * 1000), 0)
+                        _write_structured_sidecar(
+                            doc_id,
+                            page_num,
+                            _merge_sidecar_timing(
+                                structured_payload,
+                                started_at=started_at,
+                                finished_at=finished_at,
+                                duration_ms=duration_ms,
+                            ),
+                        )
                         ocr_status[doc_id][page_num] = "done"
                         return
                     except Exception as exc:
@@ -1172,7 +1498,18 @@ async def run_ocr(
     except Exception as exc:
         ocr_status[doc_id][page_num] = "error"
         try:
-            _write_structured_sidecar(doc_id, page_num, None)
+            finished_at = _utc_now_iso()
+            duration_ms = max(int((time.perf_counter() - started_at_perf) * 1000), 0)
+            _write_structured_sidecar(
+                doc_id,
+                page_num,
+                _merge_sidecar_timing(
+                    None,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    duration_ms=duration_ms,
+                ),
+            )
             error_info = _classify_ocr_exception(exc)
             ocr_path.write_text(_build_error_markdown(page_num, error_info), encoding="utf-8")
         except Exception:
