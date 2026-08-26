@@ -78,6 +78,29 @@ header {
   transition: opacity 0.3s;
 }
 
+.prompt-profile-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+.prompt-profile-control select {
+  max-width: 190px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--text);
+  padding: 5px 24px 5px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+.prompt-profile-control select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* Badge Ollama */
 .badge {
   font-size: 0.72rem;
@@ -237,6 +260,13 @@ header > .header-actions > label.btn-secondary input { display: none; }
   padding: 20px;
 }
 
+.page-visual {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+}
+
 #page-image {
   max-width: 100%;
   height: auto;
@@ -244,6 +274,69 @@ header > .header-actions > label.btn-secondary input { display: none; }
   border-radius: 3px;
   box-shadow: 0 6px 32px rgba(0,0,0,.7);
 }
+
+.ocr-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: none;
+  pointer-events: none;
+}
+
+.ocr-overlay.is-visible { display: block; }
+.ocr-overlay .ocr-region { stroke-width: 3; vector-effect: non-scaling-stroke; }
+.ocr-overlay .ocr-region-text { fill: rgba(100, 149, 237, .08); stroke: #6495ed; }
+.ocr-overlay .ocr-region-image { fill: rgba(174, 123, 54, .08); stroke: #d7a24a; }
+.ocr-overlay .ocr-region-table { fill: rgba(76, 175, 125, .16); stroke: #4caf7d; }
+.ocr-overlay .ocr-region-formula { fill: rgba(240, 168, 58, .18); stroke: #f0a83a; }
+.ocr-overlay .ocr-region-label { fill: #12131a; font: 600 14px monospace; }
+.ocr-overlay .ocr-region-label-bg-text { fill: #6495ed; }
+.ocr-overlay .ocr-region-label-bg-image { fill: #d7a24a; }
+.ocr-overlay .ocr-region-label-bg-table { fill: #4caf7d; }
+.ocr-overlay .ocr-region-label-bg-formula { fill: #f0a83a; }
+
+.ocr-overlay-status {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  max-width: calc(100% - 16px);
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: rgba(18, 19, 26, .9);
+  color: var(--muted);
+  font-size: .68rem;
+  line-height: 1.25;
+}
+
+.ocr-overlay-toggle { margin-right: 4px; }
+
+.ocr-overlay-filters {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 4px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.ocr-overlay-filters legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.ocr-overlay-filters:disabled { opacity: .42; }
+
+.ocr-overlay-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: .68rem;
+  cursor: pointer;
+}
+
+.ocr-overlay-filter input { margin: 0; cursor: pointer; }
+.ocr-overlay-filter-text { color: #8ab4ff; }
+.ocr-overlay-filter-image { color: #e0b261; }
+.ocr-overlay-filter-table { color: var(--success); }
+.ocr-overlay-filter-formula { color: var(--warn); }
 
 /* ── Striscia miniature ────────────────────────────────────────────────────── */
 .page-strip {
@@ -698,6 +791,22 @@ header > .header-actions > label.btn-secondary input { display: none; }
     min-height: 0;
     padding: 42px 26px;
   }
+
+  header {
+    height: auto;
+    min-height: 50px;
+    flex-wrap: wrap;
+    padding-block: 7px;
+  }
+
+  .header-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .prompt-profile-control select {
+    max-width: 165px;
+  }
 }
 .batch-file-count-label {
   font-weight: 600;
@@ -711,6 +820,19 @@ header > .header-actions > label.btn-secondary input { display: none; }
   max-height: 340px;
   border: 1px solid var(--border);
   border-radius: var(--r);
+}
+
+.batch-preparation-status {
+  min-height: 20px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+.batch-preparation-status strong { color: var(--text); }
+.batch-preparation-errors {
+  margin-top: 6px;
+  color: var(--accent2);
+  white-space: normal;
 }
 
 /* Tabella batch generica */

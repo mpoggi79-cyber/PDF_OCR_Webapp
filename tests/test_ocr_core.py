@@ -60,6 +60,7 @@ class OcrCoreTests(unittest.TestCase):
                 "confidence": 0.91,
             },
             "glm-ocr:latest",
+            page_num=2,
         )
 
         self.assertIn("# Fattura", markdown)
@@ -73,6 +74,7 @@ class OcrCoreTests(unittest.TestCase):
         self.assertTrue(structured["capabilities"]["table_regions"])
         self.assertTrue(structured["capabilities"]["formula_regions"])
         self.assertFalse(structured["capabilities"]["layout_visualization"])
+        self.assertEqual(structured["structure_metadata"]["regions"][0]["page"], 2)
         self.assertEqual(structured["structure_metadata"]["regions"][0]["bbox"], [1, 2, 3, 4])
 
     def test_rejects_ollama_response_without_markdown(self) -> None:

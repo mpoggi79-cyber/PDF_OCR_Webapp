@@ -12,6 +12,7 @@ from backend.config import (
     CURRENTLY_SUPPORTED_EXTENSIONS,
     DEFAULT_PAGE_IMAGE_EXTENSION,
     PDF_EXTENSIONS,
+    PDF_RENDER_SCALE,
     RASTER_IMAGE_EXTENSIONS,
     UPLOAD_DIR,
     get_available_prompt_profiles,
@@ -138,7 +139,7 @@ async def _save_uploaded_pdf(
 
         for page_num in range(page_count):
             page = pdf_doc[page_num]
-            matrix = fitz.Matrix(2.0, 2.0)
+            matrix = fitz.Matrix(PDF_RENDER_SCALE, PDF_RENDER_SCALE)
             if page_rotation:
                 matrix = matrix.prerotate(page_rotation)
             pix = page.get_pixmap(matrix=matrix)

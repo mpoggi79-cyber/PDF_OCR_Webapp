@@ -27,8 +27,16 @@ const state = {
 
 // Timer che aggiorna il display ogni secondo mentre l'OCR è in corso
 let _displayTimer = null;
+let _batchUploadTimer = null;
+let _batchUploadStartedAt = 0;
 const PDF_EXTENSIONS = ['.pdf'];
 const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg'];
+const PROMPT_PROFILE_LABELS = {
+  default: 'Generico',
+  structured_document: 'Documento strutturato',
+  structured_document_no_html: 'Strutturato, solo Markdown',
+  web_article: 'Articolo web',
+};
 
 function startDisplayTimer() {
   if (_displayTimer) return;
@@ -43,6 +51,30 @@ function startDisplayTimer() {
 
 function stopDisplayTimer() {
   if (_displayTimer) { clearInterval(_displayTimer); _displayTimer = null; }
+}
+
+function startBatchUploadTimer() {
+  stopBatchUploadTimer();
+  _batchUploadStartedAt = Date.now();
+  _batchUploadTimer = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - _batchUploadStartedAt) / 1000);
+    const count = batchState.files.length;
+    const message = `Preparazione di ${count} PDF in corso… (${fmtElapsed(elapsed)})`;
+    const button = document.getElementById('batch-start-btn');
+    if (button?.disabled) button.textContent = `⏳ ${message}`;
+    const status = document.getElementById('batch-preparation-status');
+    if (status) {
+      status.dataset.elapsed = fmtElapsed(elapsed);
+      renderBatchPreparation(batchState.preparation, batchState.errors);
+    }
+  }, 1000);
+}
+
+function stopBatchUploadTimer() {
+  if (_batchUploadTimer) {
+    clearInterval(_batchUploadTimer);
+    _batchUploadTimer = null;
+  }
 }
 
 /** Formatta secondi in mm:ss */
@@ -131,6 +163,8 @@ function applyOcrPayload(page, data) {
   } else {
     delete state.ocrStructured[page];
   }
+
+  if (page === state.currentPage) renderOcrOverlay();
 }
 
 // ── Riferimenti DOM ───────────────────────────────────────────────────────────
@@ -147,6 +181,14 @@ const els = {
   docFilename:    $('doc-filename'),
   docPages:       $('doc-pages'),
   pageImage:      $('page-image'),
+  ocrOverlay:     $('ocr-overlay'),
+  ocrOverlayStatus:$('ocr-overlay-status'),
+  ocrOverlayToggle:$('ocr-overlay-toggle'),
+  ocrOverlayFilters:$('ocr-overlay-filters'),
+  ocrOverlayText: $('ocr-overlay-text'),
+  ocrOverlayImage:$('ocr-overlay-image'),
+  ocrOverlayTable:$('ocr-overlay-table'),
+  ocrOverlayFormula:$('ocr-overlay-formula'),
   pageIndicator:  $('page-indicator'),
   prevBtn:        $('prev-btn'),
   nextBtn:        $('next-btn'),
@@ -161,6 +203,8 @@ const els = {
   exportBtn:      $('export-btn'),
   statusBar:      $('status-bar'),
   ollamaBadge:    $('ollama-badge'),
+  promptProfileSelect: $('prompt-profile-select'),
+  batchPromptProfileSelect: $('batch-prompt-profile-select'),
   pdfInput:       $('pdf-input'),
   pdfInputOverlay:$('pdf-input-overlay'),
   imageInput:     $('image-input'),
@@ -171,6 +215,9 @@ const els = {
 document.addEventListener('DOMContentLoaded', () => {
   preventBrowserFileDrop();
 
+  els.pageImage.addEventListener('load', renderOcrOverlay);
+  window.addEventListener('resize', renderOcrOverlay);
+
   // Input file header e overlay
   els.pdfInput.addEventListener('change', e => handleFile(e.target.files[0], 'pdf'));
   els.pdfInputOverlay.addEventListener('change', e => handleFile(e.target.files[0], 'pdf'));
@@ -179,6 +226,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   setupUploadArea(els.pdfUploadArea, 'pdf');
   setupUploadArea(els.imageUploadArea, 'image');
+
+  [els.promptProfileSelect, els.batchPromptProfileSelect].forEach(select => {
+    select?.addEventListener('change', () => syncPromptProfileSelectors(select));
+  });
 
   // Navigazione con tasti freccia
   document.addEventListener('keydown', e => {
@@ -249,6 +300,7 @@ async function checkOllama() {
   try {
     const res  = await fetch('/api/health');
     const data = await res.json();
+    populatePromptProfiles(data.prompt_profiles, data.default_prompt_profile);
 
     if (data.ollama !== 'ok') {
       setBadge('error', '● Ollama non raggiungibile');
@@ -260,6 +312,46 @@ async function checkOllama() {
   } catch {
     setBadge('error', '● Ollama offline');
   }
+}
+
+function populatePromptProfiles(profiles, defaultProfile) {
+  const selects = [els.promptProfileSelect, els.batchPromptProfileSelect].filter(Boolean);
+  if (!Array.isArray(profiles) || profiles.length === 0 || selects.length === 0) return;
+
+  const currentProfile = els.promptProfileSelect?.value || defaultProfile;
+  selects.forEach(select => {
+    select.replaceChildren(...profiles.map(profile => {
+      const option = document.createElement('option');
+      option.value = profile;
+      option.textContent = PROMPT_PROFILE_LABELS[profile] || profile;
+      return option;
+    }));
+  });
+
+  const selectedProfile = profiles.includes(currentProfile)
+    ? currentProfile
+    : (profiles.includes(defaultProfile) ? defaultProfile : profiles[0]);
+  selects.forEach(select => { select.value = selectedProfile; });
+}
+
+function syncPromptProfileSelectors(source) {
+  if (!source?.value) return;
+  [els.promptProfileSelect, els.batchPromptProfileSelect]
+    .filter(select => select && select !== source)
+    .forEach(select => { select.value = source.value; });
+}
+
+function getPromptProfile() {
+  const batchOverlay = document.getElementById('batch-overlay');
+  if (batchOverlay?.style.display === 'flex' && els.batchPromptProfileSelect) {
+    return els.batchPromptProfileSelect.value || 'structured_document_no_html';
+  }
+  return els.promptProfileSelect?.value || 'structured_document_no_html';
+}
+
+function withPromptProfile(path, profile = getPromptProfile()) {
+  const params = new URLSearchParams({ prompt_profile: profile });
+  return `${path}?${params.toString()}`;
 }
 
 function setBadge(type, text) {
@@ -406,7 +498,7 @@ async function uploadDocument(file, kind) {
     const form = new FormData();
     form.append('file', file);
 
-    const res = await fetch('/api/upload', { method: 'POST', body: form });
+    const res = await fetch(withPromptProfile('/api/upload'), { method: 'POST', body: form });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `HTTP ${res.status}`);
@@ -472,6 +564,7 @@ function loadPage(n) {
   // Carica immagine pagina (cache-bust con timestamp)
   els.pageImage.src = `/api/page/${state.docId}/${n}?_=${Date.now()}`;
   els.pageImage.alt = state.sourceType === 'image' ? 'Immagine originale' : `Pagina ${n + 1} del documento`;
+  renderOcrOverlay();
 
   updateAllThumbs();
   renderOcrPanel();
@@ -480,6 +573,138 @@ function loadPage(n) {
 function changePage(delta) {
   const n = state.currentPage + delta;
   if (n >= 0 && n < state.totalPages) loadPage(n);
+}
+
+function getOcrOverlayRegions(page) {
+  const structured = state.ocrStructured[page];
+  const sourceRegions = structured?.structureMetadata?.regions;
+  if (!Array.isArray(sourceRegions)) return [];
+
+  const supportedKinds = new Set(['text', 'image', 'table', 'formula', 'display_formula', 'inline_formula']);
+  const regions = [];
+
+  for (const region of sourceRegions) {
+    const rawKind = String(region?.label || '').toLowerCase();
+    const kind = rawKind.includes('formula') ? 'formula' : rawKind;
+    const bbox = region?.bbox;
+    if (
+      !supportedKinds.has(rawKind) ||
+      !Array.isArray(bbox) ||
+      bbox.length !== 4 ||
+      !bbox.every(Number.isFinite)
+    ) continue;
+
+    const [left, top, right, bottom] = bbox;
+    if (right <= left || bottom <= top) continue;
+    regions.push({ kind, index: region.index, left, top, right, bottom });
+  }
+  return regions;
+}
+
+function renderOcrOverlay() {
+  const overlayEnabled = els.ocrOverlayToggle?.checked;
+  const imageReady = els.pageImage.naturalWidth > 0 && els.pageImage.naturalHeight > 0;
+  const availableRegions = getOcrOverlayRegions(state.currentPage);
+  const enabledKinds = new Set([
+    els.ocrOverlayText?.checked && 'text',
+    els.ocrOverlayImage?.checked && 'image',
+    els.ocrOverlayTable?.checked && 'table',
+    els.ocrOverlayFormula?.checked && 'formula',
+  ].filter(Boolean));
+  const regions = availableRegions.filter(region => enabledKinds.has(region.kind));
+
+  els.ocrOverlay.classList.toggle('is-visible', Boolean(overlayEnabled && imageReady));
+  els.ocrOverlayFilters.disabled = !overlayEnabled;
+  els.ocrOverlayStatus.hidden = true;
+  els.ocrOverlay.replaceChildren();
+
+  if (!overlayEnabled) return;
+  if (!imageReady) return;
+
+  els.ocrOverlay.setAttribute(
+    'viewBox',
+    `0 0 ${els.pageImage.naturalWidth} ${els.pageImage.naturalHeight}`,
+  );
+
+  if (availableRegions.length === 0) {
+    els.ocrOverlayStatus.textContent = 'Nessuna geometria restituita dal provider per questa pagina.';
+    els.ocrOverlayStatus.hidden = false;
+    return;
+  }
+
+  if (regions.length === 0) {
+    els.ocrOverlayStatus.textContent = `Nessuna regione visibile: attiva almeno un filtro layout (${availableRegions.length} disponibili).`;
+    els.ocrOverlayStatus.hidden = false;
+    return;
+  }
+
+  const countByKind = regions.reduce((counts, region) => {
+    counts[region.kind] = (counts[region.kind] || 0) + 1;
+    return counts;
+  }, {});
+  const regionSummary = [
+    ['text', 'testo'],
+    ['image', 'immagine'],
+    ['table', 'tabella'],
+    ['formula', 'formula'],
+  ].map(([kind, label]) => {
+    const count = countByKind[kind] || 0;
+    return count ? `${count} ${label}${count === 1 ? '' : 'e'}` : null;
+  }).filter(Boolean).join(', ');
+  els.ocrOverlayStatus.textContent = `Layout visibile: ${regions.length}/${availableRegions.length} regioni (${regionSummary}). I riquadri possono essere parziali.`;
+  els.ocrOverlayStatus.hidden = false;
+
+  const namespace = 'http://www.w3.org/2000/svg';
+  for (const region of regions) {
+    const width = region.right - region.left;
+    const height = region.bottom - region.top;
+    const labels = {
+      text: 'Testo rilevato',
+      image: 'Immagine rilevata',
+      table: 'Tabella rilevata',
+      formula: 'Formula rilevata',
+    };
+    const label = labels[region.kind];
+    const classSuffix = region.kind;
+    const labelWidth = Math.max(label.length * 8 + 10, 72);
+
+    const rectangle = document.createElementNS(namespace, 'rect');
+    rectangle.setAttribute('class', `ocr-region ocr-region-${classSuffix}`);
+    rectangle.setAttribute('x', String(region.left));
+    rectangle.setAttribute('y', String(region.top));
+    rectangle.setAttribute('width', String(width));
+    rectangle.setAttribute('height', String(height));
+
+    const regionTitle = document.createElementNS(namespace, 'title');
+    regionTitle.textContent = `Regione provider ${region.index + 1}: ${label.toLowerCase()}.`;
+
+    els.ocrOverlay.append(rectangle, regionTitle);
+
+    if (region.kind === 'table' || region.kind === 'formula') {
+      const labelBackground = document.createElementNS(namespace, 'rect');
+      labelBackground.setAttribute('class', `ocr-region-label-bg-${classSuffix}`);
+      labelBackground.setAttribute('x', String(region.left));
+      labelBackground.setAttribute('y', String(region.top));
+      labelBackground.setAttribute('width', String(labelWidth));
+      labelBackground.setAttribute('height', '20');
+
+      const labelText = document.createElementNS(namespace, 'text');
+      labelText.setAttribute('class', 'ocr-region-label');
+      labelText.setAttribute('x', String(region.left + 5));
+      labelText.setAttribute('y', String(region.top + 14));
+      labelText.textContent = label;
+
+      els.ocrOverlay.append(labelBackground, labelText);
+    }
+  }
+}
+
+function toggleOcrOverlay() {
+  renderOcrOverlay();
+}
+
+function toggleOcrOverlayFilter() {
+  renderOcrOverlay();
 }
 
 // ── Striscia miniature ────────────────────────────────────────────────────────
@@ -609,7 +834,7 @@ async function runOcr() {
 async function runOcrAll() {
   if (!state.docId) return;
   try {
-    const res  = await fetch(`/api/ocr-job/${state.docId}`, { method: 'POST' });
+    const res  = await fetch(withPromptProfile(`/api/ocr-job/${state.docId}`), { method: 'POST' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
 
@@ -635,7 +860,7 @@ async function triggerOcr(page) {
   updateAllThumbs();
 
   try {
-    const res  = await fetch(`/api/ocr/${state.docId}/${page}`, { method: 'POST' });
+    const res  = await fetch(withPromptProfile(`/api/ocr/${state.docId}/${page}`), { method: 'POST' });
     const data = await res.json();
 
     if (data.status === 'done' && data.markdown != null) {
@@ -915,11 +1140,15 @@ const batchState = {
   files:     [],      // File[] selezionati dall'utente
   batchId:   null,    // batch_id restituito dal backend
   docs:      [],      // [{doc_id, filename, page_count, pages_done, pages_error, status}]
+  preparation: null,  // stato di preparazione file restituito dal backend
+  errors:    [],       // errori di preparazione per singolo file
   pollTimer: null,
   done:      false,
+  promptProfile: null,
 };
 
 function openBatch() {
+  syncPromptProfileSelectors(els.promptProfileSelect);
   document.getElementById('batch-overlay').style.display = 'flex';
   if (!batchState.batchId) resetBatchToStep1();
 }
@@ -935,13 +1164,17 @@ function resetBatchToStep1() {
   batchState.files   = [];
   batchState.batchId = null;
   batchState.docs    = [];
+  batchState.preparation = null;
+  batchState.errors = [];
   batchState.done    = false;
+  batchState.promptProfile = null;
 
   document.getElementById('batch-step-select').style.display   = 'block';
   document.getElementById('batch-step-progress').style.display = 'none';
   document.getElementById('batch-file-list').style.display     = 'none';
   document.getElementById('batch-drop-area').style.display     = 'flex';
   document.getElementById('batch-result-actions').style.display = 'none';
+  document.getElementById('batch-preparation-status').textContent = '';
   const fi = document.getElementById('folder-input');
   const si = document.getElementById('files-input');
   if (fi) fi.value = '';
@@ -969,37 +1202,98 @@ function renderBatchFileList() {
     <td>${fmtSize(totalSize)}</td>
   </tr></tfoot></table>`;
   document.getElementById('batch-files-table-wrap').innerHTML = html;
+  renderBatchPreparation(batchState.preparation, batchState.errors);
 }
 
 function clearBatchFiles() {
   batchState.files = [];
   document.getElementById('batch-file-list').style.display = 'none';
   document.getElementById('batch-drop-area').style.display = 'flex';
+  document.getElementById('batch-preparation-status').textContent = '';
   document.getElementById('folder-input').value = '';
   document.getElementById('files-input').value  = '';
 }
 
 // ── Avvio batch ───────────────────────────────────────────────────────────────
 
+function renderBatchPreparation(preparation, errors = []) {
+  const status = document.getElementById('batch-preparation-status');
+  if (!status || !preparation) return;
+
+  const total = Number(preparation.total_files || batchState.files.length);
+  const prepared = Number(preparation.prepared_files || 0);
+  const failed = Number(preparation.failed_files || 0);
+  const current = preparation.current_filename;
+  const elapsed = status.dataset.elapsed;
+  const stateLabel = preparation.status === 'ready' ? 'Preparazione completata' : 'Preparazione in corso';
+  const currentLabel = current ? ` · File corrente: ${escHtml(current)}` : '';
+  const elapsedLabel = elapsed ? ` · Tempo: ${elapsed}` : '';
+  const errorLabel = failed ? ` · Errori: ${failed}` : '';
+  const details = errors.length ? `<div class="batch-preparation-errors">${errors
+    .map(error => `${escHtml(error.filename || 'File')} : ${escHtml(error.error || 'errore')}`)
+    .join('<br>')}</div>` : '';
+
+  status.innerHTML = `<strong>${stateLabel}: ${prepared}/${total} PDF preparati</strong>${currentLabel}${errorLabel}${elapsedLabel}${details}`;
+}
+
 async function startBatch() {
   if (batchState.files.length === 0) return;
 
   const btn = document.getElementById('batch-start-btn');
+  batchState.promptProfile = getPromptProfile();
   btn.disabled = true;
-  btn.textContent = '⏳ Caricamento file…';
+  btn.setAttribute('aria-busy', 'true');
+  btn.textContent = `⏳ Preparazione di ${batchState.files.length} PDF…`;
+  startBatchUploadTimer();
 
   try {
-    showLoading(`Caricamento di ${batchState.files.length} file PDF e conversione pagine…`);
-
-    const form = new FormData();
-    batchState.files.forEach(f => form.append('files', f));
-
-    const res = await fetch('/api/batch', { method: 'POST', body: form });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${res.status}`);
+    const initRes = await fetch('/api/batch/init', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        filenames: batchState.files.map(file => file.name),
+        sizes: batchState.files.map(file => file.size),
+      }),
+    });
+    if (!initRes.ok) {
+      const err = await initRes.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${initRes.status}`);
     }
-    const data = await res.json();
+    const initData = await initRes.json();
+    batchState.batchId = initData.batch_id;
+    batchState.preparation = initData.preparation;
+    renderBatchPreparation(batchState.preparation, batchState.errors);
+
+    for (const [index, file] of batchState.files.entries()) {
+      batchState.preparation.current_filename = file.name;
+      renderBatchPreparation(batchState.preparation, batchState.errors);
+      const form = new FormData();
+      form.append('index', String(index));
+      form.append('file', file);
+      const res = await fetch(withPromptProfile(`/api/batch/${batchState.batchId}/files`, batchState.promptProfile), { method: 'POST', body: form });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      batchState.preparation = data.preparation;
+      batchState.docs = data.prepared_files || batchState.docs;
+      batchState.errors = data.errors || batchState.errors;
+      renderBatchPreparation(batchState.preparation, batchState.errors);
+    }
+
+    const completeRes = await fetch(`/api/batch/${batchState.batchId}/complete`, { method: 'POST' });
+    if (!completeRes.ok) {
+      const err = await completeRes.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${completeRes.status}`);
+    }
+    const completeData = await completeRes.json();
+    batchState.preparation = completeData.preparation;
+    batchState.docs = completeData.prepared_files || batchState.docs;
+    batchState.errors = completeData.errors || batchState.errors;
+    renderBatchPreparation(batchState.preparation, batchState.errors);
+
+    const data = { batch_id: batchState.batchId, docs: batchState.docs, errors: batchState.errors };
 
     if (data.errors && data.errors.length > 0) {
       const errList = data.errors.map(e => `• ${e.filename}: ${e.error}`).join('\n');
@@ -1009,7 +1303,6 @@ async function startBatch() {
       throw new Error('Nessun file è stato caricato correttamente.');
     }
 
-    batchState.batchId = data.batch_id;
     batchState.docs    = data.docs;
 
     // Mostra pannello progresso
@@ -1018,7 +1311,7 @@ async function startBatch() {
     renderBatchProgress(data.docs);
 
     // Avvia OCR
-    const startRes = await fetch(`/api/batch/${data.batch_id}/start`, { method: 'POST' });
+    const startRes = await fetch(withPromptProfile(`/api/batch/${data.batch_id}/start`, batchState.promptProfile), { method: 'POST' });
     if (!startRes.ok) throw new Error('Errore avvio OCR batch.');
     const startData = await startRes.json();
 
@@ -1031,8 +1324,10 @@ async function startBatch() {
   } catch (err) {
     alert('Errore batch: ' + err.message);
     btn.disabled    = false;
+    btn.removeAttribute('aria-busy');
     btn.textContent = '▶ Avvia Conversione Batch';
   } finally {
+    stopBatchUploadTimer();
     hideLoading();
   }
 }

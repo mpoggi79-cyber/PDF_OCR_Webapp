@@ -1,9 +1,9 @@
 {
-  "id": "T005C",
+  "id": "T005E",
   "group": "T005",
-  "label": "Movimenti_Telepass_multipagina_strutturata",
+  "label": "Movimenti Telepass multipagina strutturato",
   "status": "ready-for-input",
   "source_type": "pdf",
-  "prompt_profile": "structured_document",
+  "prompt_profile": "structured_document_no_html",
   "notes": "Inserire un PDF multipagina strutturato di Movimenti Telepass in input/."
 }

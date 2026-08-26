@@ -36,6 +36,142 @@ def _persist_batch_snapshot(batch_id: str, docs: list[dict], status: str) -> Non
         created_at=persisted.get("created_at"),
         status=status,
     )
+
+
+def initialize_batch(
+    filenames: list[str],
+    sizes: list[int] | None = None,
+) -> dict:
+    if not filenames:
+        raise HTTPException(status_code=400, detail="Seleziona almeno un file PDF.")
+
+    batch_id = str(uuid.uuid4())
+    normalized_sizes = sizes or []
+    files = [
+        {
+            "index": index,
+            "filename": filename,
+            "size": normalized_sizes[index] if index < len(normalized_sizes) else None,
+            "status": "pending",
+        }
+        for index, filename in enumerate(filenames)
+    ]
+    preparation = {
+        "status": "preparing",
+        "total_files": len(files),
+        "prepared_files": 0,
+        "failed_files": 0,
+        "current_filename": None,
+        "files": files,
+    }
+    save_batch_state(batch_id, [], status="preparing", preparation=preparation, errors=[])
+    return {"batch_id": batch_id, "preparation": preparation, "docs": [], "errors": []}
+
+
+def _get_preparation(batch_id: str) -> tuple[list[dict], dict]:
+    persisted = read_batch_state(batch_id)
+    if persisted is None:
+        raise HTTPException(status_code=404, detail="Batch non trovato.")
+    preparation = persisted.get("preparation")
+    if not isinstance(preparation, dict):
+        raise HTTPException(status_code=409, detail="Il batch non supporta la preparazione incrementale.")
+    docs = persisted.get("docs") or []
+    return docs, preparation
+
+
+async def prepare_batch_file(
+    batch_id: str,
+    index: int,
+    file: UploadFile,
+    *,
+    prompt_profile: str | None = None,
+) -> dict:
+    docs, preparation = _get_preparation(batch_id)
+    files = preparation.get("files")
+    if not isinstance(files, list) or index < 0 or index >= len(files):
+        raise HTTPException(status_code=400, detail="Indice file non valido.")
+
+    entry = files[index]
+    if entry.get("status") in {"prepared", "error"}:
+        return get_batch_preparation_payload(batch_id)
+
+    errors = list((read_batch_state(batch_id) or {}).get("errors") or [])
+    preparation["current_filename"] = entry.get("filename") or file.filename
+    entry["status"] = "processing"
+    _persist_preparation_snapshot(batch_id, docs, preparation, errors)
+
+    try:
+        metadata = await save_uploaded_document(file, batch_id=batch_id, prompt_profile=prompt_profile)
+    except HTTPException as exc:
+        error = {"index": index, "filename": file.filename, "error": exc.detail}
+        errors.append(error)
+        entry["status"] = "error"
+        entry["error"] = str(exc.detail)
+        preparation["failed_files"] = int(preparation.get("failed_files") or 0) + 1
+    except Exception as exc:
+        error = {"index": index, "filename": file.filename, "error": str(exc)}
+        errors.append(error)
+        entry["status"] = "error"
+        entry["error"] = str(exc)
+        preparation["failed_files"] = int(preparation.get("failed_files") or 0) + 1
+    else:
+        docs.append(
+            {
+                "doc_id": metadata["doc_id"],
+                "filename": metadata["filename"],
+                "page_count": metadata["page_count"],
+            }
+        )
+        entry["status"] = "prepared"
+        entry["doc_id"] = metadata["doc_id"]
+        preparation["prepared_files"] = int(preparation.get("prepared_files") or 0) + 1
+
+    preparation["current_filename"] = None
+    _persist_preparation_snapshot(batch_id, docs, preparation, errors)
+    return get_batch_preparation_payload(batch_id)
+
+
+def _persist_preparation_snapshot(
+    batch_id: str,
+    docs: list[dict],
+    preparation: dict,
+    errors: list[dict],
+    *,
+    status: str = "preparing",
+) -> None:
+    persisted = read_batch_state(batch_id) or {}
+    save_batch_state(
+        batch_id,
+        docs,
+        created_at=persisted.get("created_at"),
+        status=status,
+        preparation=preparation,
+        errors=errors,
+    )
+
+
+def get_batch_preparation_payload(batch_id: str) -> dict:
+    docs, preparation = _get_preparation(batch_id)
+    persisted = read_batch_state(batch_id) or {}
+    return {
+        "batch_id": batch_id,
+        "preparation": preparation,
+        "prepared_files": docs,
+        "errors": persisted.get("errors") or [],
+    }
+
+
+def complete_batch_preparation(batch_id: str) -> dict:
+    docs, preparation = _get_preparation(batch_id)
+    files = preparation.get("files") or []
+    if any(entry.get("status") == "pending" or entry.get("status") == "processing" for entry in files):
+        raise HTTPException(status_code=409, detail="La preparazione batch non e' ancora terminata.")
+
+    preparation["status"] = "ready"
+    preparation["current_filename"] = None
+    errors = list((read_batch_state(batch_id) or {}).get("errors") or [])
+    _persist_preparation_snapshot(batch_id, docs, preparation, errors, status="pending")
+    return get_batch_preparation_payload(batch_id)
 async def upload_batch(files: list[UploadFile], *, prompt_profile: str | None = None) -> dict:
     batch_id = str(uuid.uuid4())
     docs: list[dict] = []
@@ -69,6 +205,10 @@ def start_batch_ocr(
     prompt_profile: str | None = None,
 ) -> dict:
     docs = _get_batch_docs_or_404(batch_id)
+    persisted = read_batch_state(batch_id) or {}
+    preparation = persisted.get("preparation")
+    if isinstance(preparation, dict) and preparation.get("status") != "ready":
+        raise HTTPException(status_code=409, detail="Completa prima la preparazione dei file batch.")
 
     jobs_started = 0
     pages_queued = 0
@@ -141,6 +281,7 @@ def _resolve_batch_status(docs: list[dict]) -> str:
 
 def get_batch_status_payload(batch_id: str) -> dict:
     docs = _get_batch_docs_or_404(batch_id)
+    persisted = read_batch_state(batch_id) or {}
 
     result: list[dict] = []
     for doc in docs:
@@ -169,9 +310,19 @@ def get_batch_status_payload(batch_id: str) -> dict:
             }
         )
 
-    batch_status = _resolve_batch_status(result)
+    preparation = persisted.get("preparation")
+    if isinstance(preparation, dict) and preparation.get("status") == "preparing":
+        batch_status = "preparing"
+    else:
+        batch_status = _resolve_batch_status(result)
     _persist_batch_snapshot(batch_id, docs, status=batch_status)
-    return {"batch_id": batch_id, "status": batch_status, "docs": result}
+    return {
+        "batch_id": batch_id,
+        "status": batch_status,
+        "docs": result,
+        "preparation": preparation if isinstance(preparation, dict) else None,
+        "errors": persisted.get("errors") or [],
+    }
 
 
 def get_batch_report_payload(batch_id: str) -> dict:

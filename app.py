@@ -7,8 +7,9 @@ import time
 from typing import List
 
 import httpx
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -22,7 +23,10 @@ from backend.config import (
 
 from backend.batch import (
     export_batch_zip_payload,
+    complete_batch_preparation,
     get_batch_report_payload,
+    initialize_batch,
+    prepare_batch_file,
     get_batch_status_payload,
     start_batch_ocr,
     upload_batch,
@@ -37,6 +41,11 @@ from backend.ocr import get_document_job_payload, get_ocr_payload, queue_documen
 from backend.state import rebuild_ocr_status
 
 app = FastAPI(title="PDF OCR Webapp")
+
+
+class BatchInitializationRequest(BaseModel):
+    filenames: list[str]
+    sizes: list[int] | None = None
 
 app.add_middleware(
     CORSMiddleware,
@@ -147,6 +156,33 @@ async def export_markdown(doc_id: str) -> JSONResponse:
 @app.post("/api/batch")
 async def batch_upload(files: List[UploadFile] = File(...), prompt_profile: str | None = None) -> JSONResponse:
     return JSONResponse(await upload_batch(files, prompt_profile=prompt_profile))
+
+
+@app.post("/api/batch/init")
+async def batch_init(payload: BatchInitializationRequest) -> JSONResponse:
+    return JSONResponse(initialize_batch(payload.filenames, payload.sizes))
+
+
+@app.post("/api/batch/{batch_id}/files")
+async def batch_file_upload(
+    batch_id: str,
+    index: int = Form(...),
+    file: UploadFile = File(...),
+    prompt_profile: str | None = None,
+) -> JSONResponse:
+    return JSONResponse(
+        await prepare_batch_file(
+            batch_id,
+            index,
+            file,
+            prompt_profile=prompt_profile,
+        )
+    )
+
+
+@app.post("/api/batch/{batch_id}/complete")
+async def batch_complete(batch_id: str) -> JSONResponse:
+    return JSONResponse(complete_batch_preparation(batch_id))
 
 
 @app.post("/api/batch/{batch_id}/start")

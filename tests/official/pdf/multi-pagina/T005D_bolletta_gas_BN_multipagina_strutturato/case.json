@@ -1,0 +1,9 @@
+{
+  "id": "T005D",
+  "group": "T005",
+  "label": "Bolletta gas BN multipagina strutturata",
+  "status": "ready-for-input",
+  "source_type": "pdf",
+  "prompt_profile": "structured_document_no_html",
+  "notes": "Inserire un PDF multipagina strutturato di bolletta gas in bianco e nero in input/."
+}

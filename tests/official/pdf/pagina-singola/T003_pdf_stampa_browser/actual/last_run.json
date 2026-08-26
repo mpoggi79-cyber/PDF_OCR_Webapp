@@ -8,8 +8,8 @@
   "detail": "Markdown generato con successo.",
   "doc_id": "5c691047-d4be-4d16-9d02-44a6a9e9f559",
   "input_file": "T003_glm-ocr.pdf",
-  "expected_file": null,
-  "expected_present": false,
+  "expected_file": "T003_glm-ocr.md",
+  "expected_present": true,
   "actual_file": "D:\\SVILUPPO MATTEO\\Progetto PDF_OCR_Webapp\\tests\\official\\pdf\\pagina-singola\\T003_pdf_stampa_browser\\actual\\T003_glm-ocr.md",
   "job_status": "done",
   "runner_elapsed_seconds": 19.189,
@@ -21,7 +21,7 @@
   "finished_at": "2026-06-05T17:54:30.499931+00:00",
   "updated_at": "2026-06-05T17:54:12.151492+00:00",
   "generated_at": "2026-06-05T17:54:31.343970+00:00",
-  "expected_comparison": "not_available",
+  "expected_comparison": "match",
   "comparison_warning": null,
-  "comparison_checked_at": "2026-08-22T23:35:07.805586+00:00"
+  "comparison_checked_at": "2026-08-23T09:18:41.240937+00:00"
 }

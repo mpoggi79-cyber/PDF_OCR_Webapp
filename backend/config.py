@@ -12,6 +12,7 @@ OCR_TIMEOUT = 240.0
 OCR_BLOCK_SIZE = 10
 OCR_RETRY_MAX_ATTEMPTS = 2
 OCR_RETRY_BACKOFF_BASE_SECONDS = 0.5
+PDF_RENDER_SCALE = 2.0
 
 OCR_ENABLE_STRUCTURED_OUTPUT = True
 OCR_ENABLE_LAYOUT_VISUALIZATION = True
@@ -29,7 +30,7 @@ GLMOCR_OFFICIAL_TASK_PROMPTS = {
     "formula": "Formula Recognition:",
 }
 
-DEFAULT_OCR_PROMPT_PROFILE = "structured_document"
+DEFAULT_OCR_PROMPT_PROFILE = "structured_document_no_html"
 
 OCR_PROMPT_PROFILES = {
     "default": {
@@ -65,6 +66,7 @@ OCR_PROMPT_PROFILES = {
             "Extract all text and document structure from this image and output the result in clean Markdown only. "
             "Never output HTML tags. For every table or structured field/value block, use a pipe-delimited Markdown table. "
             "Preserve the exact field/value structure, row order, headings, dates, amounts, codes, and visible grouping. "
+            "Always transcribe all text in the page header and margins, including date, sender, company details, recipient, address, and tax code; do not skip the top area even when it is faint or separated from the main body. "
             "Preserve empty fields as empty cells when they are part of the real document structure. "
             "Do not invent spacer rows, filler text, or commentary. Output only the document content."
         ),

@@ -22,7 +22,13 @@
         "0.0.0.0",
         "--port",
         "8080",
-        "--reload"
+        "--reload",
+        "--reload-exclude",
+        ".venv",
+        "--reload-exclude",
+        "uploads",
+        "--reload-exclude",
+        "tests"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

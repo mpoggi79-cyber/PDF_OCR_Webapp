@@ -1,36 +1,36 @@
 {
-  "generated_at": "2026-08-23T00:32:34.456440+00:00",
+  "generated_at": "2026-08-23T21:34:07.431134+00:00",
   "base_url": "http://localhost:8080",
   "cases_considered": 1,
   "cases_executed": 1,
   "cases_label": "Casi confrontati",
   "results": [
     {
-      "case_id": "T002",
-      "group": "T002",
-      "label": "PDF fotografico scannerizzato",
+      "case_id": "T006B",
+      "group": "T006",
+      "label": "Verbale multipagina scannerizzato",
       "prompt_profile": "structured_document_no_html",
       "source_type": "pdf",
       "status": "generated",
       "detail": "Markdown generato con successo.",
-      "doc_id": "e24b10d6-9d5b-47f9-9a2e-5104eb9e67d1",
-      "input_file": "T002_Fattura 77 SCM Assistenza Pantografi novembre 2025 EU.pdf",
-      "expected_file": "T002_Fattura 77 SCM Assistenza Pantografi novembre 2025 EU.md",
+      "doc_id": "c4523846-67aa-430c-9535-ed731578875a",
+      "input_file": "T006B_Assunzione firmata.pdf",
+      "expected_file": "T006B_Assunzione firmata.md",
       "expected_present": true,
       "expected_comparison": "match",
       "comparison_warning": null,
-      "actual_file": "D:\\SVILUPPO MATTEO\\Progetto PDF_OCR_Webapp\\tests\\official\\pdf\\pagina-singola\\T002_pdf_fotografico_scanner\\actual\\T002_Fattura 77 SCM Assistenza Pantografi novembre 2025 EU.md",
+      "actual_file": "D:\\SVILUPPO MATTEO\\Progetto PDF_OCR_Webapp\\tests\\official\\pdf\\multi-pagina\\T006B_verbale_multipagina_scanner\\actual\\T006B_Assunzione firmata.md",
       "job_status": "done",
-      "runner_elapsed_seconds": 56.497,
-      "ocr_total_duration_seconds": 56.397,
+      "runner_elapsed_seconds": 66.771,
+      "ocr_total_duration_seconds": 66.155,
       "pages_duration_seconds": {
-        "0": 56.397
+        "0": 66.155
       },
-      "started_at": "2026-08-23T00:07:16.723986+00:00",
-      "finished_at": "2026-08-23T00:08:13.121897+00:00",
-      "updated_at": "2026-08-23T00:07:16.715241+00:00",
-      "generated_at": "2026-08-23T00:08:13.253292+00:00",
-      "comparison_checked_at": "2026-08-23T00:32:34.455954+00:00"
+      "started_at": "2026-08-23T21:15:39.929397+00:00",
+      "finished_at": "2026-08-23T21:16:46.084767+00:00",
+      "updated_at": "2026-08-23T21:15:39.925050+00:00",
+      "generated_at": "2026-08-23T21:16:46.712748+00:00",
+      "comparison_checked_at": "2026-08-23T21:34:07.430626+00:00"
     }
   ]
 }

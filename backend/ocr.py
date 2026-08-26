@@ -12,6 +12,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
+import fitz
 import httpx
 from fastapi import BackgroundTasks, HTTPException
 
@@ -298,7 +299,35 @@ def _format_detail_for_markdown(detail: str) -> str:
     return " ".join(detail.strip().split()).replace("`", "'")
 
 
-def _extract_structured_regions(raw_regions: Any) -> list[dict[str, Any]]:
+def _get_image_pixel_size(img_path: Path) -> tuple[int, int] | None:
+    try:
+        pixmap = fitz.Pixmap(str(img_path))
+        return pixmap.width, pixmap.height
+    except Exception:
+        return None
+
+
+def _scale_normalized_bbox(bbox: Any, image_size: tuple[int, int] | None) -> Any:
+    # bbox_2d from glmocr layout detection is normalized 0-1000 per axis, not pixel coordinates.
+    if not image_size or not isinstance(bbox, list) or len(bbox) != 4:
+        return bbox
+    if not all(isinstance(value, (int, float)) for value in bbox):
+        return bbox
+    width, height = image_size
+    x1, y1, x2, y2 = bbox
+    return [
+        x1 / 1000 * width,
+        y1 / 1000 * height,
+        x2 / 1000 * width,
+        y2 / 1000 * height,
+    ]
+
+
+def _extract_structured_regions(
+    raw_regions: Any,
+    image_size: tuple[int, int] | None = None,
+    page_num: int = 0,
+) -> list[dict[str, Any]]:
     if not isinstance(raw_regions, list):
         return []
 
@@ -310,12 +339,14 @@ def _extract_structured_regions(raw_regions: Any) -> list[dict[str, Any]]:
             if not isinstance(region, dict):
                 continue
             label = str(region.get("label") or region.get("type") or "text")
+            raw_bbox = region.get("bbox") or region.get("bbox_2d")
+            bbox = raw_bbox if region.get("bbox") is not None else _scale_normalized_bbox(raw_bbox, image_size)
             normalized.append(
                 {
-                    "page": int(region.get("page", page_index)),
+                    "page": page_num,
                     "index": int(region.get("index", region_index)),
                     "label": label,
-                    "bbox": region.get("bbox") or region.get("bbox_2d"),
+                    "bbox": bbox,
                     "content": region.get("content"),
                 }
             )
@@ -771,7 +802,12 @@ def _write_structured_sidecar(doc_id: str, page_num: int, payload: dict[str, Any
     )
 
 
-def _normalize_ollama_response(result: dict[str, Any], model_name: str) -> tuple[str, dict[str, Any] | None]:
+def _normalize_ollama_response(
+    result: dict[str, Any],
+    model_name: str,
+    image_size: tuple[int, int] | None = None,
+    page_num: int = 0,
+) -> tuple[str, dict[str, Any] | None]:
     markdown = result.get("response") or result.get("md_results")
     if not isinstance(markdown, str):
         raise ValueError("Malformed OCR response: missing string response field")
@@ -780,7 +816,7 @@ def _normalize_ollama_response(result: dict[str, Any], model_name: str) -> tuple
     if raw_regions is None:
         raw_regions = result.get("regions")
 
-    structured_regions = _extract_structured_regions(raw_regions)
+    structured_regions = _extract_structured_regions(raw_regions, image_size, page_num)
     structure_metadata = {
         "regions": structured_regions,
         "page_count": len(raw_regions) if isinstance(raw_regions, list) else None,
@@ -802,13 +838,18 @@ def _normalize_ollama_response(result: dict[str, Any], model_name: str) -> tuple
     return markdown, structured_payload
 
 
-def _normalize_glmocr_result(result: Any, model_name: str) -> tuple[str, dict[str, Any] | None]:
+def _normalize_glmocr_result(
+    result: Any,
+    model_name: str,
+    image_size: tuple[int, int] | None = None,
+    page_num: int = 0,
+) -> tuple[str, dict[str, Any] | None]:
     markdown = getattr(result, "markdown_result", None)
     if not isinstance(markdown, str):
         raise ValueError("Malformed glmocr result: missing markdown_result")
 
     json_result = getattr(result, "json_result", None)
-    structured_regions = _extract_structured_regions(json_result)
+    structured_regions = _extract_structured_regions(json_result, image_size, page_num)
     layout_visualization = getattr(result, "layout_visualization", None)
     if layout_visualization is None:
         layout_visualization = getattr(result, "_layout_visualization", None)
@@ -863,6 +904,8 @@ def _run_glmocr_sync(
     img_path: Path,
     model_name: str,
     prompt_mapping: dict[str, str],
+    image_size: tuple[int, int] | None = None,
+    page_num: int = 0,
 ) -> tuple[str, dict[str, Any] | None]:
     from glmocr import GlmOcr
 
@@ -876,21 +919,25 @@ def _run_glmocr_sync(
 
     with GlmOcr(**_build_glmocr_kwargs(model_name, prompt_mapping)) as parser:
         result = parser.parse(img_path, **parse_kwargs)
-    return _normalize_glmocr_result(result, model_name)
+    return _normalize_glmocr_result(result, model_name, image_size, page_num)
 
 
 async def _run_ocr_with_glmocr(
     img_path: Path,
     model_name: str,
     prompt_mapping: dict[str, str],
+    image_size: tuple[int, int] | None = None,
+    page_num: int = 0,
 ) -> tuple[str, dict[str, Any] | None]:
-    return await asyncio.to_thread(_run_glmocr_sync, img_path, model_name, prompt_mapping)
+    return await asyncio.to_thread(_run_glmocr_sync, img_path, model_name, prompt_mapping, image_size, page_num)
 
 
 async def _run_ocr_with_ollama_http(
     img_b64: str,
     model_name: str,
     prompt_mapping: dict[str, str],
+    image_size: tuple[int, int] | None = None,
+    page_num: int = 0,
 ) -> tuple[str, dict[str, Any] | None]:
     payload: dict[str, Any] = {
         "model": model_name,
@@ -909,7 +956,7 @@ async def _run_ocr_with_ollama_http(
         result = response.json()
     if not isinstance(result, dict):
         raise ValueError("Malformed OCR response: expected JSON object")
-    return _normalize_ollama_response(result, model_name)
+    return _normalize_ollama_response(result, model_name, image_size, page_num)
 
 
 def _build_error_markdown(page_num: int, error_info: dict) -> str:
@@ -1388,6 +1435,7 @@ async def run_ocr(
         prompt_profile = metadata.get("prompt_profile") or DEFAULT_OCR_PROMPT_PROFILE
         prompt_mapping = get_prompt_profile_mapping(prompt_profile)
         img_b64 = base64.b64encode(img_path.read_bytes()).decode("utf-8")
+        image_size = _get_image_pixel_size(img_path)
         last_error: Exception | None = None
         provider_result: tuple[str, dict[str, Any] | None] | None = None
         providers = _get_candidate_providers()
@@ -1399,9 +1447,9 @@ async def run_ocr(
                 for attempt in range(1, OCR_RETRY_MAX_ATTEMPTS + 1):
                     try:
                         if provider_name == "glmocr":
-                            provider_result = await _run_ocr_with_glmocr(img_path, model_name, prompt_mapping)
+                            provider_result = await _run_ocr_with_glmocr(img_path, model_name, prompt_mapping, image_size)
                         else:
-                            provider_result = await _run_ocr_with_ollama_http(img_b64, model_name, prompt_mapping)
+                            provider_result = await _run_ocr_with_ollama_http(img_b64, model_name, prompt_mapping, image_size)
 
                         markdown, structured_payload = provider_result
                         markdown = _post_process_markdown(

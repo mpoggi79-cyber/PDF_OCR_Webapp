@@ -1,56 +1,81 @@
 # Dataset test OCR ufficiali
 
-Questa cartella contiene i casi ufficiali di test per PDF OCR Webapp.
+Questa cartella contiene i casi ufficiali usati per verificare la qualità OCR del progetto.
 
-Ogni caso ha sempre questa struttura:
+## Struttura di un caso
 
-- input: inserisci qui un solo file sorgente PDF o immagine
-- expected: opzionale, contiene il markdown atteso con lo stesso nome base del file di input
-- actual: contiene il markdown generato dal runner e il report dell'ultima esecuzione
-- case.json: descrive il caso, il prompt profile e gli eventuali parametri di rasterizzazione previsti
+Ogni caso ha questa struttura:
 
-Regole pratiche:
+- `input/`: file sorgente PDF o immagine
+- `expected/`: markdown atteso, quando disponibile
+- `actual/`: markdown prodotto dal runner e report dell'ultima esecuzione
+- `case.json`: descrizione del caso, profilo OCR e parametri previsti
 
-- usa un solo file di input per cartella caso
-- se hai piu' documenti simili, crea piu' casi fratelli nello stesso gruppo logico
-- esempio: gruppo T005 con casi T005A, T005B, T005C
-- il dataset attuale mantiene almeno 2 casi per ogni tipologia principale
-- se aggiungi il file expected, usa lo stesso nome base del file di input e estensione .md
-- non usare uploads per i casi ufficiali: uploads resta area runtime del backend
+## Regole pratiche
 
-Esempio:
+- usare un solo file sorgente per caso
+- raggruppare casi simili nello stesso blocco logico
+- non usare `uploads/` come area source del dataset ufficiale
+- se si aggiunge un `expected`, usare lo stesso nome base del file di input e mantenere `.md`
+- il confronto è testuale esatto; prima di consolidare `expected` diversi, verificare visivamente la qualità del contenuto
 
-- input/bonifico.pdf
-- expected/bonifico.md
-- actual/bonifico.md
+## Runner ufficiale
 
-Runner:
+Comandi principali:
 
-- elenco casi: python tests/run_official_tests.py --list
-- controllo struttura: python tests/run_official_tests.py --check-structure
-- esegui tutti i casi con input presente: python tests/run_official_tests.py
-- esegui un solo caso: python tests/run_official_tests.py --case T001B
-- esegui un caso il cui ID coincide con il gruppo: python tests/run_official_tests.py --case T002 --exact-case
-- esegui un intero gruppo: python tests/run_official_tests.py --case T005
-- confronta actual ed expected senza nuovo OCR: python tests/run_official_tests.py --case T005 --exact-case --compare-only
+```powershell
+python tests/run_official_tests.py --list
+python tests/run_official_tests.py --check-structure
+python tests/run_official_tests.py --case T001B
+python tests/run_official_tests.py --case T002 --exact-case
+python tests/run_official_tests.py --case T005 --exact-case --compare-only
+```
 
-Regole del runner:
+Il runner:
 
-- quando l'ID passato a `--case` coincide con un gruppo, senza `--exact-case` vengono selezionati tutti i casi del gruppo; per esempio `--case T002` include T002, T002A e T002B
-- `--check-structure` controlla `case.json`, `input`, `expected` e `actual` senza contattare il backend
-- `--compare-only` aggiorna i report di confronto senza eseguire nuovo OCR
-- il confronto tra actual ed expected e' testuale esatto; una differenza richiede una verifica visiva prima di consolidare l'expected
-- il runner salva `actual/last_run.json` e i riepiloghi in `tests/official/results/`
+- elenca i casi disponibili
+- verifica struttura e presenza dei file richiesti
+- esegue OCR reale se richiesto
+- confronta `actual` con `expected` senza eseguire nuovo OCR quando usato con `--compare-only`
+- salva i risultati in `actual/last_run.json` e in `tests/official/results/`
 
-Confronto risultati:
+## Regole di selezione
 
-- quando `expected/<nome>.md` esiste, il runner confronta il Markdown generato in `actual/<nome>.md` con l'expected
-- `expected_comparison` vale `match`, `different` oppure `not_available`
-- in caso di differenza viene stampato e registrato un avviso; il runner non modifica mai expected/
+- `--case T002` senza `--exact-case` include il gruppo completo `T002`, `T002A`, `T002B`
+- `--check-structure` non contatta il backend, ma verifica la struttura dei casi
+- `expected_comparison` può essere `match`, `different` o `not_available`
 
-Baseline verificata per T002 e T002A:
+## Baseline attualmente verificate
 
-- T002 usa `structured_document_no_html` con `page_rotation = 90` per il PDF scannerizzato con contenuto ruotato
-- T002A usa lo stesso profilo con `page_rotation = 0` e conserva l'orientamento nativo del PDF
-- l'actual ruotato di T002 coincide byte-per-byte con l'expected consolidato di T002A; anche l'expected di T002 e' consolidato e il confronto risulta `match`
-- con il profilo no-HTML le tabelle devono essere pipe-delimited Markdown e l'output non deve contenere tag HTML
+### T002 e T002A
+
+- T002 usa `structured_document_no_html` con `page_rotation = 90`
+- T002A usa `structured_document_no_html` con `page_rotation = 0`
+- il contenuto ruotato di T002 è stato verificato visivamente e confrontato con il caso equivalente non ruotato
+- con il profilo `no_html`, le tabelle devono essere pipe-delimited e l'output non deve contenere tag HTML
+
+### T006 e T006B
+
+- T006 è un PDF multipagina scannerizzato e il markdown consolidato è stato verificato visivamente
+- T006B è un PDF scannerizzato con firma e timbro; il risultato atteso è stato consolidato dopo confronto valido
+- la pipeline PDF usa `PDF_RENDER_SCALE = 2.0`
+- ogni pagina è sottoposta a una sola elaborazione OCR sull'immagine rasterizzata completa; le baseline vanno riesaminate con questo comportamento
+- l'overlay `Layout` e i relativi filtri mostrano soltanto metadata strutturati del provider e non modificano il Markdown confrontato dal runner
+
+### T010 e T011
+
+- entrambi sono casi di calibrazione geometrica per l'overlay `Layout`, non benchmark di qualita' testuale
+- T011 (tabella singola con origine in alto a sinistra) ha rilevato che il layout detector di `glmocr` restituisce `bbox_2d` normalizzato 0-1000 per asse, non in pixel: il riquadro appariva con origine corretta ma dimensione scalata in modo non uniforme su X e Y
+- fix applicato in `backend/ocr.py`: le bbox vengono riconvertite in pixel reali usando le dimensioni effettive della pagina rasterizzata prima di essere scritte nel sidecar
+- nei documenti multipagina ogni sidecar `ocr/page_N.json` appartiene alla propria pagina; le regioni salvate riportano `page` con indice zero-based globale, anche quando il provider usa un indice locale
+- la UI deve mostrare l'overlay della pagina selezionata; una pagina senza regioni del provider puo' continuare a mostrare l'avviso di geometria assente
+
+### T013
+
+- pagina A4 verticale con 4 etichette minuscole agli angoli su sfondo altrimenti bianco
+- con la soglia di default (`pipeline.layout.threshold = 0.3`) il layout detector non trova alcuna regione: nessun crop viene sottoposto a OCR e il markdown risulta vuoto, pur essendo il testo leggibile
+- abbassando la soglia fino a 0.01 emerge una sola regione a bassa confidenza che copre l'intera pagina e recupera solo 2 delle 4 etichette: non e' una correzione adottabile in produzione, va trattato come limite noto del modello su pagine con contenuto molto sparso
+
+## Nota importante
+
+Il dataset ufficiale non va considerato un insieme statico di “verità assoluta”: i `expected` vanno aggiornati solo dopo verifica visiva e con criterio, perché la qualità OCR dipende anche da struttura, leggibilità e ordine di lettura del documento originale.

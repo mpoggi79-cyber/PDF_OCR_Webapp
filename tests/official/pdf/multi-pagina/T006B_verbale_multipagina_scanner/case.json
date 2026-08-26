@@ -4,6 +4,6 @@
   "label": "Verbale multipagina scannerizzato",
   "status": "ready-for-input",
   "source_type": "pdf",
-  "prompt_profile": "default",
+  "prompt_profile": "structured_document_no_html",
   "notes": "Inserire un PDF multipagina scannerizzato di verbale in input/."
 }

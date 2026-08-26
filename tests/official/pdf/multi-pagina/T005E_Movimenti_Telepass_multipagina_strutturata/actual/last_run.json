@@ -1,0 +1,30 @@
+{
+  "case_id": "T005E",
+  "group": "T005",
+  "label": "Movimenti Telepass multipagina strutturato",
+  "prompt_profile": "structured_document_no_html",
+  "source_type": "pdf",
+  "status": "generated",
+  "detail": "Markdown generato con successo.",
+  "doc_id": "4d2f15f9-c61d-45a5-aac4-48e9eb00cf2a",
+  "input_file": "T005E_movimenti Telepass.pdf",
+  "expected_file": "T005E_movimenti Telepass.md",
+  "expected_present": true,
+  "expected_comparison": "match",
+  "comparison_warning": null,
+  "actual_file": "D:\\SVILUPPO MATTEO\\Progetto PDF_OCR_Webapp\\tests\\official\\pdf\\multi-pagina\\T005E_Movimenti_Telepass_multipagina_strutturata\\actual\\T005E_movimenti Telepass.md",
+  "job_status": "done",
+  "runner_elapsed_seconds": 158.529,
+  "ocr_total_duration_seconds": 158.311,
+  "pages_duration_seconds": {
+    "0": 40.039,
+    "1": 42.469,
+    "2": 41.795,
+    "3": 34.008
+  },
+  "started_at": "2026-08-23T18:34:53.255099+00:00",
+  "finished_at": "2026-08-23T18:37:31.599840+00:00",
+  "updated_at": "2026-08-23T18:34:53.252430+00:00",
+  "generated_at": "2026-08-23T18:37:31.790857+00:00",
+  "comparison_checked_at": "2026-08-23T18:45:41.031536+00:00"
+}

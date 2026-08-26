@@ -188,6 +188,8 @@ def save_batch_state(
     *,
     created_at: str | None = None,
     status: str = "pending",
+    preparation: dict[str, Any] | None = None,
+    errors: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     normalized_docs = [
         {
@@ -199,6 +201,12 @@ def save_batch_state(
         if doc.get("doc_id")
     ]
 
+    previous = read_batch_state(batch_id) or {}
+    if preparation is None:
+        preparation = previous.get("preparation")
+    if errors is None:
+        errors = previous.get("errors")
+
     payload = {
         "batch_id": batch_id,
         "created_at": created_at or _utc_now_iso(),
@@ -206,6 +214,10 @@ def save_batch_state(
         "status": status,
         "docs": normalized_docs,
     }
+    if isinstance(preparation, dict):
+        payload["preparation"] = preparation
+    if isinstance(errors, list) and errors:
+        payload["errors"] = errors
     _write_json(get_batch_state_path(batch_id), payload)
     batch_registry[batch_id] = normalized_docs
     return payload

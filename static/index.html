@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PDF / Immagini → Markdown OCR</title>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <link rel="stylesheet" href="/static/style.css?v=20260506b">
+  <link rel="stylesheet" href="/static/style.css?v=20260824g">
   <link rel="stylesheet" href="/static/tooltip.css?v=20260506b">
 </head>
 <body>
@@ -21,6 +21,15 @@
 
     <div class="header-actions">
       <span id="status-bar" class="status-bar"></span>
+      <label class="prompt-profile-control" data-tooltip="Scegli le istruzioni usate dal modello OCR.&#10;La scelta vale per il prossimo upload e per l'avvio dell'OCR.">
+        <span>Prompt OCR</span>
+        <select id="prompt-profile-select" aria-label="Profilo prompt OCR">
+          <option value="structured_document">Documento strutturato</option>
+          <option value="structured_document_no_html" selected>Strutturato, solo Markdown</option>
+          <option value="default">Generico</option>
+          <option value="web_article">Articolo web</option>
+        </select>
+      </label>
       <span id="ollama-badge" class="badge badge-checking"
             data-tooltip="Stato del servizio Ollama locale.&#10;Verde = OK, il modello glm-ocr è disponibile.&#10;Giallo = Ollama attivo ma modello non trovato.&#10;Rosso = Ollama non raggiungibile.&#10;Assicurati di aver eseguito 'ollama serve'.">● Ollama</span>
       <button id="export-btn" onclick="exportAll()" style="display:none"
@@ -49,6 +58,30 @@
       <div class="panel-header">
         <span>Documento originale</span>
         <div class="nav-row">
+          <label class="toggle ocr-overlay-toggle"
+              data-tooltip="Mostra testo, immagini, tabelle e formule rilevati dal provider OCR sulla pagina originale.&#10;I riquadri possono essere parziali: indicano la segmentazione restituita dal provider, non una validazione della struttura.">
+            <input type="checkbox" id="ocr-overlay-toggle" onchange="toggleOcrOverlay()">
+            <span>Layout</span>
+          </label>
+          <fieldset id="ocr-overlay-filters" class="ocr-overlay-filters" disabled>
+            <legend>Filtri layout</legend>
+            <label class="ocr-overlay-filter ocr-overlay-filter-text" data-tooltip="Mostra o nasconde le regioni di testo restituite dal provider.">
+              <input type="checkbox" id="ocr-overlay-text" checked onchange="toggleOcrOverlayFilter()">
+              <span>Testo</span>
+            </label>
+            <label class="ocr-overlay-filter ocr-overlay-filter-image" data-tooltip="Mostra o nasconde le regioni immagine restituite dal provider.">
+              <input type="checkbox" id="ocr-overlay-image" checked onchange="toggleOcrOverlayFilter()">
+              <span>Immagini</span>
+            </label>
+            <label class="ocr-overlay-filter ocr-overlay-filter-table" data-tooltip="Mostra o nasconde le regioni tabella restituite dal provider. Il testo interno non ha coordinate separate quando il provider non restituisce bbox di celle.">
+              <input type="checkbox" id="ocr-overlay-table" checked onchange="toggleOcrOverlayFilter()">
+              <span>Tabelle</span>
+            </label>
+            <label class="ocr-overlay-filter ocr-overlay-filter-formula" data-tooltip="Mostra o nasconde le regioni formula restituite dal provider.">
+              <input type="checkbox" id="ocr-overlay-formula" checked onchange="toggleOcrOverlayFilter()">
+              <span>Formule</span>
+            </label>
+          </fieldset>
           <button id="prev-btn" onclick="changePage(-1)"
                   data-tooltip="Vai alla pagina precedente.&#10;Scorciatoia: tasto ← (freccia sinistra)">◀</button>
           <span id="page-indicator">1 / 1</span>
@@ -58,7 +91,11 @@
       </div>
 
       <div class="panel-body img-body">
-        <img id="page-image" alt="Pagina documento">
+        <div id="page-visual" class="page-visual">
+          <img id="page-image" alt="Pagina documento">
+          <svg id="ocr-overlay" class="ocr-overlay" aria-hidden="true"></svg>
+          <div id="ocr-overlay-status" class="ocr-overlay-status" hidden></div>
+        </div>
       </div>
 
       <!-- Striscia miniature pagine -->
@@ -140,6 +177,15 @@
       <!-- Intestazione -->
       <div class="batch-header">
         <h2>📁 Conversione Batch PDF</h2>
+        <label class="prompt-profile-control batch-prompt-profile-control" data-tooltip="Profilo prompt usato per tutti i PDF di questo batch.">
+          <span>Prompt OCR</span>
+          <select id="batch-prompt-profile-select" aria-label="Profilo prompt OCR del batch">
+            <option value="structured_document">Documento strutturato</option>
+            <option value="structured_document_no_html" selected>Strutturato, solo Markdown</option>
+            <option value="default">Generico</option>
+            <option value="web_article">Articolo web</option>
+          </select>
+        </label>
         <button class="batch-close" onclick="closeBatch()" title="Chiudi">✕</button>
       </div>
 
@@ -167,6 +213,7 @@
             <button class="btn-secondary" onclick="clearBatchFiles()">✕ Svuota selezione</button>
           </div>
           <div id="batch-files-table-wrap" class="batch-table-wrap"></div>
+          <div id="batch-preparation-status" class="batch-preparation-status" aria-live="polite"></div>
           <div class="batch-actions">
             <button id="batch-start-btn" class="btn-primary" onclick="startBatch()">
               ▶ Avvia Conversione Batch
@@ -207,6 +254,6 @@
   </div>
 
   <script src="/static/tooltip.js?v=20260506b"></script>
-  <script src="/static/app.js?v=20260506b"></script>
+  <script src="/static/app.js?v=20260824g"></script>
 </body>
 </html>

@@ -8,8 +8,8 @@
   "detail": "Markdown generato con successo.",
   "doc_id": "e385e9c2-5be4-488f-8e82-d6a272a767e3",
   "input_file": "T003B_Vision - Ollama.pdf",
-  "expected_file": null,
-  "expected_present": false,
+  "expected_file": "T003B_Vision - Ollama.md",
+  "expected_present": true,
   "actual_file": "D:\\SVILUPPO MATTEO\\Progetto PDF_OCR_Webapp\\tests\\official\\pdf\\pagina-singola\\T003B_articolo_pagina_singola_stampa_browser\\actual\\T003B_Vision - Ollama.md",
   "job_status": "done",
   "runner_elapsed_seconds": 12.076,
@@ -21,7 +21,7 @@
   "finished_at": "2026-06-05T17:54:42.840167+00:00",
   "updated_at": "2026-06-05T17:54:31.429632+00:00",
   "generated_at": "2026-06-05T17:54:43.508541+00:00",
-  "expected_comparison": "not_available",
+  "expected_comparison": "match",
   "comparison_warning": null,
-  "comparison_checked_at": "2026-08-22T23:35:07.806072+00:00"
+  "comparison_checked_at": "2026-08-23T09:22:45.229387+00:00"
 }
